@@ -86,7 +86,7 @@ func initializeDefaultOptions(opts *AutoscalerOptions) error {
 	}
 	if opts.PredicateChecker == nil {
 		predicateCheckerStopChannel := make(chan struct{})
-		predicateChecker, err := simulator.NewPredicateChecker(opts.KubeClient, predicateCheckerStopChannel)
+		predicateChecker, err := simulator.NewPredicateChecker(opts.KubeClient, opts.ResourceNamespace, predicateCheckerStopChannel)
 		if err != nil {
 			return err
 		}

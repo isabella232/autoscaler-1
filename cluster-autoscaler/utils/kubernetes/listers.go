@@ -31,6 +31,7 @@ import (
 	v1lister "k8s.io/client-go/listers/core/v1"
 	v1policylister "k8s.io/client-go/listers/policy/v1beta1"
 	"k8s.io/client-go/tools/cache"
+	multicache "sigs.k8s.io/controller-runtime/pkg/cache"
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 )
 
@@ -82,17 +83,17 @@ func NewListerRegistry(allNode NodeLister, readyNode NodeLister, scheduledPod Po
 }
 
 // NewListerRegistryWithDefaultListers returns a registry filled with listers of the default implementations
-func NewListerRegistryWithDefaultListers(kubeClient client.Interface, stopChannel <-chan struct{}) ListerRegistry {
-	unschedulablePodLister := NewUnschedulablePodLister(kubeClient, stopChannel)
-	scheduledPodLister := NewScheduledPodLister(kubeClient, stopChannel)
+func NewListerRegistryWithDefaultListers(kubeClient client.Interface, namespace string, stopChannel <-chan struct{}) ListerRegistry {
+	unschedulablePodLister := NewUnschedulablePodLister(kubeClient, namespace, stopChannel)
+	scheduledPodLister := NewScheduledPodLister(kubeClient, namespace, stopChannel)
 	readyNodeLister := NewReadyNodeLister(kubeClient, stopChannel)
 	allNodeLister := NewAllNodeLister(kubeClient, stopChannel)
-	podDisruptionBudgetLister := NewPodDisruptionBudgetLister(kubeClient, stopChannel)
-	daemonSetLister := NewDaemonSetLister(kubeClient, stopChannel)
-	replicationControllerLister := NewReplicationControllerLister(kubeClient, stopChannel)
-	jobLister := NewJobLister(kubeClient, stopChannel)
-	replicaSetLister := NewReplicaSetLister(kubeClient, stopChannel)
-	statefulSetLister := NewStatefulSetLister(kubeClient, stopChannel)
+	podDisruptionBudgetLister := NewPodDisruptionBudgetLister(kubeClient, namespace, stopChannel)
+	daemonSetLister := NewDaemonSetLister(kubeClient, namespace, stopChannel)
+	replicationControllerLister := NewReplicationControllerLister(kubeClient, namespace, stopChannel)
+	jobLister := NewJobLister(kubeClient, namespace, stopChannel)
+	replicaSetLister := NewReplicaSetLister(kubeClient, namespace, stopChannel)
+	statefulSetLister := NewStatefulSetLister(kubeClient, namespace, stopChannel)
 	return NewListerRegistry(allNodeLister, readyNodeLister, scheduledPodLister,
 		unschedulablePodLister, podDisruptionBudgetLister, daemonSetLister,
 		replicationControllerLister, jobLister, replicaSetLister, statefulSetLister)
@@ -175,8 +176,8 @@ func (unschedulablePodLister *UnschedulablePodLister) List() ([]*apiv1.Pod, erro
 }
 
 // NewUnschedulablePodLister returns a lister providing pods that failed to be scheduled.
-func NewUnschedulablePodLister(kubeClient client.Interface, stopchannel <-chan struct{}) PodLister {
-	return NewUnschedulablePodInNamespaceLister(kubeClient, apiv1.NamespaceAll, stopchannel)
+func NewUnschedulablePodLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodLister {
+	return NewUnschedulablePodInNamespaceLister(kubeClient, namespace, stopchannel)
 }
 
 // NewUnschedulablePodInNamespaceLister returns a lister providing pods that failed to be scheduled in the given namespace.
@@ -185,9 +186,12 @@ func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, namespace
 	selector := fields.ParseSelectorOrDie("spec.nodeName==" + "" + ",status.phase!=" +
 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
 	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
-	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
+	store := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	a := multicache.MultiNamespacedCacheBuilder(namespace)
+
 	podLister := v1lister.NewPodLister(store)
-	go reflector.Run(stopchannel)
+	podReflector := cache.NewReflector(podListWatch, &apiv1.Pod{}, store, time.Hour)
+	go podReflector.Run(stopchannel)
 	return &UnschedulablePodLister{
 		podLister: podLister,
 	}
@@ -204,11 +208,11 @@ func (lister *ScheduledPodLister) List() ([]*apiv1.Pod, error) {
 }
 
 // NewScheduledPodLister builds ScheduledPodLister
-func NewScheduledPodLister(kubeClient client.Interface, stopchannel <-chan struct{}) PodLister {
+func NewScheduledPodLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodLister {
 	// watch unscheduled pods
 	selector := fields.ParseSelectorOrDie("spec.nodeName!=" + "" + ",status.phase!=" +
 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
-	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", apiv1.NamespaceAll, selector)
+	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
 	podLister := v1lister.NewPodLister(store)
 	go reflector.Run(stopchannel)
@@ -296,8 +300,8 @@ func (lister *PodDisruptionBudgetListerImpl) List() ([]*policyv1.PodDisruptionBu
 }
 
 // NewPodDisruptionBudgetLister builds a pod disruption budget lister.
-func NewPodDisruptionBudgetLister(kubeClient client.Interface, stopchannel <-chan struct{}) PodDisruptionBudgetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.PolicyV1beta1().RESTClient(), "poddisruptionbudgets", apiv1.NamespaceAll, fields.Everything())
+func NewPodDisruptionBudgetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodDisruptionBudgetLister {
+	listWatcher := cache.NewListWatchFromClient(kubeClient.PolicyV1beta1().RESTClient(), "poddisruptionbudgets", namespace, fields.Everything())
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &policyv1.PodDisruptionBudget{}, time.Hour)
 	pdbLister := v1policylister.NewPodDisruptionBudgetLister(store)
 	go reflector.Run(stopchannel)
@@ -307,8 +311,8 @@ func NewPodDisruptionBudgetLister(kubeClient client.Interface, stopchannel <-cha
 }
 
 // NewDaemonSetLister builds a daemonset lister.
-func NewDaemonSetLister(kubeClient client.Interface, stopchannel <-chan struct{}) v1appslister.DaemonSetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "daemonsets", apiv1.NamespaceAll, fields.Everything())
+func NewDaemonSetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1appslister.DaemonSetLister {
+	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "daemonsets", namespace, fields.Everything())
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &appsv1.DaemonSet{}, time.Hour)
 	lister := v1appslister.NewDaemonSetLister(store)
 	go reflector.Run(stopchannel)
@@ -316,8 +320,8 @@ func NewDaemonSetLister(kubeClient client.Interface, stopchannel <-chan struct{}
 }
 
 // NewReplicationControllerLister builds a replicationcontroller lister.
-func NewReplicationControllerLister(kubeClient client.Interface, stopchannel <-chan struct{}) v1lister.ReplicationControllerLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "replicationcontrollers", apiv1.NamespaceAll, fields.Everything())
+func NewReplicationControllerLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1lister.ReplicationControllerLister {
+	listWatcher := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "replicationcontrollers", namespace, fields.Everything())
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &apiv1.ReplicationController{}, time.Hour)
 	lister := v1lister.NewReplicationControllerLister(store)
 	go reflector.Run(stopchannel)
@@ -325,8 +329,8 @@ func NewReplicationControllerLister(kubeClient client.Interface, stopchannel <-c
 }
 
 // NewJobLister builds a job lister.
-func NewJobLister(kubeClient client.Interface, stopchannel <-chan struct{}) v1batchlister.JobLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.BatchV1().RESTClient(), "jobs", apiv1.NamespaceAll, fields.Everything())
+func NewJobLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1batchlister.JobLister {
+	listWatcher := cache.NewListWatchFromClient(kubeClient.BatchV1().RESTClient(), "jobs", namespace, fields.Everything())
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &batchv1.Job{}, time.Hour)
 	lister := v1batchlister.NewJobLister(store)
 	go reflector.Run(stopchannel)
@@ -334,8 +338,8 @@ func NewJobLister(kubeClient client.Interface, stopchannel <-chan struct{}) v1ba
 }
 
 // NewReplicaSetLister builds a replicaset lister.
-func NewReplicaSetLister(kubeClient client.Interface, stopchannel <-chan struct{}) v1appslister.ReplicaSetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "replicasets", apiv1.NamespaceAll, fields.Everything())
+func NewReplicaSetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1appslister.ReplicaSetLister {
+	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "replicasets", namespace, fields.Everything())
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &appsv1.ReplicaSet{}, time.Hour)
 	lister := v1appslister.NewReplicaSetLister(store)
 	go reflector.Run(stopchannel)
@@ -343,8 +347,8 @@ func NewReplicaSetLister(kubeClient client.Interface, stopchannel <-chan struct{
 }
 
 // NewStatefulSetLister builds a statefulset lister.
-func NewStatefulSetLister(kubeClient client.Interface, stopchannel <-chan struct{}) v1appslister.StatefulSetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "statefulsets", apiv1.NamespaceAll, fields.Everything())
+func NewStatefulSetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1appslister.StatefulSetLister {
+	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "statefulsets", namespace, fields.Everything())
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &appsv1.StatefulSet{}, time.Hour)
 	lister := v1appslister.NewStatefulSetLister(store)
 	go reflector.Run(stopchannel)
