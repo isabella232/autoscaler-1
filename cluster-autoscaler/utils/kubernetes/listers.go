@@ -31,7 +31,6 @@ import (
 	v1lister "k8s.io/client-go/listers/core/v1"
 	v1policylister "k8s.io/client-go/listers/policy/v1beta1"
 	"k8s.io/client-go/tools/cache"
-	multicache "sigs.k8s.io/controller-runtime/pkg/cache"
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 )
 
@@ -83,17 +82,17 @@ func NewListerRegistry(allNode NodeLister, readyNode NodeLister, scheduledPod Po
 }
 
 // NewListerRegistryWithDefaultListers returns a registry filled with listers of the default implementations
-func NewListerRegistryWithDefaultListers(kubeClient client.Interface, namespace string, stopChannel <-chan struct{}) ListerRegistry {
-	unschedulablePodLister := NewUnschedulablePodLister(kubeClient, namespace, stopChannel)
-	scheduledPodLister := NewScheduledPodLister(kubeClient, namespace, stopChannel)
+func NewListerRegistryWithDefaultListers(kubeClient client.Interface, stopChannel <-chan struct{}) ListerRegistry {
+	unschedulablePodLister := NewUnschedulablePodLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	scheduledPodLister := NewScheduledPodLister(kubeClient, apiv1.NamespaceAll, stopChannel)
 	readyNodeLister := NewReadyNodeLister(kubeClient, stopChannel)
 	allNodeLister := NewAllNodeLister(kubeClient, stopChannel)
-	podDisruptionBudgetLister := NewPodDisruptionBudgetLister(kubeClient, namespace, stopChannel)
-	daemonSetLister := NewDaemonSetLister(kubeClient, namespace, stopChannel)
-	replicationControllerLister := NewReplicationControllerLister(kubeClient, namespace, stopChannel)
-	jobLister := NewJobLister(kubeClient, namespace, stopChannel)
-	replicaSetLister := NewReplicaSetLister(kubeClient, namespace, stopChannel)
-	statefulSetLister := NewStatefulSetLister(kubeClient, namespace, stopChannel)
+	podDisruptionBudgetLister := NewPodDisruptionBudgetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	daemonSetLister := NewDaemonSetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	replicationControllerLister := NewReplicationControllerLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	jobLister := NewJobLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	replicaSetLister := NewReplicaSetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	statefulSetLister := NewStatefulSetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
 	return NewListerRegistry(allNodeLister, readyNodeLister, scheduledPodLister,
 		unschedulablePodLister, podDisruptionBudgetLister, daemonSetLister,
 		replicationControllerLister, jobLister, replicaSetLister, statefulSetLister)
@@ -187,7 +186,6 @@ func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, namespace
 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
 	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
 	store := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-	a := multicache.MultiNamespacedCacheBuilder(namespace)
 
 	podLister := v1lister.NewPodLister(store)
 	podReflector := cache.NewReflector(podListWatch, &apiv1.Pod{}, store, time.Hour)

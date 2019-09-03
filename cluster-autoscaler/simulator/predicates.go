@@ -18,21 +18,20 @@ package simulator
 
 import (
 	"fmt"
-	"strings"
-	"sync"
-
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kube_util "k8s.io/autoscaler/cluster-autoscaler/utils/kubernetes"
-	informers "k8s.io/client-go/informers"
+	ca_informers "k8s.io/autoscaler/cluster-autoscaler/utils/kubernetes/informers"
+	"k8s.io/client-go/informers"
 	kube_client "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/scheduler"
 	"k8s.io/kubernetes/pkg/scheduler/algorithm/predicates"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	"k8s.io/kubernetes/pkg/scheduler/factory"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
-
+	"strings"
+	"sync"
 	// We need to import provider to initialize default scheduler.
 	"k8s.io/kubernetes/pkg/scheduler/algorithmprovider"
 
@@ -107,24 +106,22 @@ func (NoOpEventRecorder) AnnotatedEventf(object runtime.Object, annotations map[
 }
 
 // NewPredicateChecker builds PredicateChecker.
-func NewPredicateChecker(kubeClient kube_client.Interface, namespace string, stop <-chan struct{}) (*PredicateChecker, error) {
+func NewPredicateChecker(kubeClient kube_client.Interface, namespaces []string, stop <-chan struct{}) (*PredicateChecker, error) {
 	staticInitIfNeeded()
 
-	filteredOptions := informers.WithNamespace(namespace)
 	informerFactory := informers.NewSharedInformerFactory(kubeClient, 0)
-	filteredInformerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, 0, filteredOptions)
 	algorithmProvider := factory.DefaultProvider
 
 	// Set up the configurator which can create schedulers from configs.
 	nodeInformer := informerFactory.Core().V1().Nodes()
-	podInformer := filteredInformerFactory.Core().V1().Pods()
+	podInformer := ca_informers.NewPodInformer(informerFactory, namespaces)
 	pvInformer := informerFactory.Core().V1().PersistentVolumes()
-	pvcInformer := filteredInformerFactory.Core().V1().PersistentVolumeClaims()
-	replicationControllerInformer := filteredInformerFactory.Core().V1().ReplicationControllers()
-	replicaSetInformer := filteredInformerFactory.Apps().V1().ReplicaSets()
-	statefulSetInformer := filteredInformerFactory.Apps().V1().StatefulSets()
-	serviceInformer := filteredInformerFactory.Core().V1().Services()
-	pdbInformer := filteredInformerFactory.Policy().V1beta1().PodDisruptionBudgets()
+	pvcInformer := ca_informers.NewPersistentVolumeClaimInformer(informerFactory, namespaces)
+	replicationControllerInformer := ca_informers.NewReplicationControllerInformer(informerFactory, namespaces)
+	replicaSetInformer := ca_informers.NewReplicaSetInformer(informerFactory, namespaces)
+	statefulSetInformer := ca_informers.NewStatefulSetInformer(informerFactory, namespaces)
+	serviceInformer := ca_informers.NewServiceInformer(informerFactory, namespaces)
+	pdbInformer := ca_informers.NewPodDisruptionBudgetInformer(informerFactory, namespaces)
 	storageClassInformer := informerFactory.Storage().V1().StorageClasses()
 	configurator := factory.NewConfigFactory(&factory.ConfigFactoryArgs{
 		SchedulerName:                  apiv1.DefaultSchedulerName,

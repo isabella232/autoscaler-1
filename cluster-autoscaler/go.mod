@@ -52,39 +52,47 @@ replace k8s.io/sample-controller => k8s.io/sample-controller v0.0.0-201908191433
 
 require (
 	cloud.google.com/go v0.44.3
-	github.com/Azure/azure-sdk-for-go v21.4.0+incompatible
-	github.com/Azure/go-autorest v11.1.2+incompatible
+	github.com/Azure/azure-sdk-for-go v23.2.0+incompatible
+	github.com/Azure/go-autorest v11.2.8+incompatible
 	github.com/aws/aws-sdk-go v1.16.26
+	github.com/coreos/prometheus-operator v0.31.1-0.20190820122404-56ca4a7e3306
 	github.com/digitalocean/godo v1.19.0
-	github.com/ghodss/yaml v0.0.0-20180820084758-c7ce16629ff4
+	github.com/evanphx/json-patch v4.5.0+incompatible // indirect
+	github.com/ghodss/yaml v1.0.0
+	github.com/go-logr/logr v0.1.0 // indirect
 	github.com/google/go-cmp v0.3.1 // indirect
-	github.com/google/pprof v0.0.0-20190723021845-34ac40c74b70 // indirect
+	github.com/googleapis/gnostic v0.2.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
+	github.com/imdario/mergo v0.3.6 // indirect
 	github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af
-	github.com/json-iterator/go v0.0.0-20180701071628-ab8a2e0c74be
-	github.com/kr/pty v1.1.8 // indirect
-	github.com/prometheus/client_golang v0.9.2
+	github.com/json-iterator/go v1.1.5
+	github.com/onsi/ginkgo v1.7.0 // indirect
+	github.com/onsi/gomega v1.4.3 // indirect
+	github.com/prometheus/client_golang v0.9.3-0.20190127221311-3c4408c8b829
 	github.com/satori/go.uuid v1.2.0
-	github.com/spf13/pflag v1.0.1
+	github.com/spf13/pflag v1.0.3
 	github.com/stretchr/testify v1.3.0
+	go.uber.org/atomic v1.3.2 // indirect
+	go.uber.org/multierr v1.1.0 // indirect
+	go.uber.org/zap v1.9.1 // indirect
 	golang.org/x/crypto v0.0.0-20190820162420-60c769a6c586
-	golang.org/x/mobile v0.0.0-20190814143026-e8b3e6111d02 // indirect
 	golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7 // indirect
 	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
 	golang.org/x/sys v0.0.0-20190813064441-fde4db37ae7a // indirect
-	golang.org/x/tools v0.0.0-20190822174633-71f556f074d4 // indirect
 	google.golang.org/api v0.9.0
 	google.golang.org/genproto v0.0.0-20190819201941-24fa4b261c55 // indirect
 	google.golang.org/grpc v1.23.0 // indirect
 	gopkg.in/gcfg.v1 v1.2.0
-	gopkg.in/yaml.v2 v2.2.1
-	honnef.co/go/tools v0.0.1-2019.2.2 // indirect
+	gopkg.in/yaml.v2 v2.2.2
 	k8s.io/api v0.0.0
 	k8s.io/apimachinery v0.0.0
-	k8s.io/client-go v0.0.0
+	k8s.io/apiserver v0.0.0
+	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	k8s.io/cloud-provider v0.0.0
 	k8s.io/component-base v0.0.0
 	k8s.io/klog v0.3.1
 	k8s.io/kubernetes v1.15.3
 	k8s.io/legacy-cloud-providers v0.0.0
+
+	k8s.io/utils v0.0.0-20190506122338-8fab8cb257d5 // indirect
 )

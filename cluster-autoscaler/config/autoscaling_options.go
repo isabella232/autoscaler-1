@@ -112,7 +112,7 @@ type AutoscalingOptions struct {
 	// ConfigNamespace is the namespace cluster-autoscaler is running in and all related configmaps live in
 	ConfigNamespace string
 	// ResourceNamespace is the namespace cluster-autoscaler will look for namespaced-scoped resources in
-	ResourceNamespace string
+	ResourceNamespace []string
 	// ClusterName if available
 	ClusterName string
 	// NodeAutoprovisioningEnabled tells whether the node auto-provisioning is enabled for this cluster.

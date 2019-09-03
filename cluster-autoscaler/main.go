@@ -65,6 +65,10 @@ func (flag *MultiStringFlag) String() string {
 	return "[" + strings.Join(*flag, " ") + "]"
 }
 
+func (flag *MultiStringFlag) Len() int {
+	return len(*flag)
+}
+
 // Set adds a new configuration.
 func (flag *MultiStringFlag) Set(value string) error {
 	*flag = append(*flag, value)
@@ -84,7 +88,7 @@ var (
 	kubeConfigFile         = flag.String("kubeconfig", "", "Path to kubeconfig file with authorization and master location information.")
 	cloudConfig            = flag.String("cloud-config", "", "The path to the cloud provider configuration file.  Empty string for no configuration file.")
 	namespace              = flag.String("namespace", "kube-system", "Namespace in which cluster-autoscaler run.")
-	resourceNamespace      = flag.String("resource-namespace", metav1.NamespaceAll, "Namespace to look for namespaced-scoped resources in.")
+	resourceNamespace      = multiStringFlag("resource-namespace", "Namespace to look for namespaced-scoped resources in.")
 	scaleDownEnabled       = flag.Bool("scale-down-enabled", true, "Should CA scale down the cluster")
 	scaleDownDelayAfterAdd = flag.Duration("scale-down-delay-after-add", 10*time.Minute,
 		"How long after scale up that scale down evaluation resumes")
@@ -190,6 +194,14 @@ func createAutoscalingOptions() config.AutoscalingOptions {
 	if err != nil {
 		klog.Fatalf("Failed to parse flags: %v", err)
 	}
+
+	if resourceNamespace.Len() == 0 {
+		err = resourceNamespace.Set(metav1.NamespaceAll)
+		if err != nil {
+			klog.Fatalf("Failed to set namespaceAll as default", err)
+		}
+	}
+
 	return config.AutoscalingOptions{
 		CloudConfig:                         *cloudConfig,
 		CloudProviderName:                   *cloudProviderFlag,
