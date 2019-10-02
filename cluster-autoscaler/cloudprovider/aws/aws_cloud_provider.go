@@ -325,8 +325,8 @@ func (ng *AwsNodeGroup) TemplateNodeInfo() (*schedulernodeinfo.NodeInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-
-	nodeInfo := schedulernodeinfo.NewNodeInfo(cloudprovider.BuildKubeProxy(ng.asg.Name))
+	var pods []*apiv1.Pod
+	nodeInfo := schedulernodeinfo.NewNodeInfo(pods...)
 	nodeInfo.SetNode(node)
 	return nodeInfo, nil
 }
