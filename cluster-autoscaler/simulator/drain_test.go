@@ -82,6 +82,19 @@ func TestFastGetPodsToMove(t *testing.T) {
 	assert.Equal(t, 1, len(r4))
 	assert.Equal(t, pod2, r4[0])
 
+	// ExtendedDaemonSet pod
+	pod41 := &apiv1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "pod4-1",
+			Namespace:       "ns",
+			OwnerReferences: GenerateOwnerReferences("ds", "ExtendedDaemonSetReplicaSet", "datadoghq.com/v1alpha1", ""),
+		},
+	}
+	r41, err := FastGetPodsToMove(schedulernodeinfo.NewNodeInfo(pod2, pod3, pod41), true, true, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(r41))
+	assert.Equal(t, pod2, r41[0])
+
 	// Kube-system
 	pod5 := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

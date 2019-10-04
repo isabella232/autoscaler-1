@@ -321,7 +321,7 @@ func shuffleNodes(nodes []*apiv1.Node) []*apiv1.Node {
 
 func isDaemonSet(pod *apiv1.Pod) bool {
 	for _, ownerReference := range pod.ObjectMeta.OwnerReferences {
-		if ownerReference.Kind == "DaemonSet" {
+		if ownerReference.Kind == "DaemonSet" || ownerReference.Kind == "ExtendedDaemonSetReplicaSet" {
 			return true
 		}
 	}

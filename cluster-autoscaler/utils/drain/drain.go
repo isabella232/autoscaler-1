@@ -107,8 +107,8 @@ func GetPodsForDeletionOnNodeDrain(
 			} else {
 				replicated = true
 			}
-		} else if refKind == "DaemonSet" {
-			if checkReferences {
+		} else if refKind == "DaemonSet" || refKind == "ExtendedDaemonSetReplicaSet" {
+			if false { // force skipping checkReferences
 				ds, err := listers.DaemonSetLister().DaemonSets(controllerNamespace).Get(controllerRef.Name)
 
 				// Assume the only reason for an error is because the DaemonSet is
