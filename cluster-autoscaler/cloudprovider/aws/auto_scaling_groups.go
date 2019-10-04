@@ -260,18 +260,63 @@ func (m *asgCache) DeleteInstances(instances []*AwsInstanceRef) error {
 // Fetch automatically discovered ASGs. These ASGs should be unregistered if
 // they no longer exist in AWS.
 func (m *asgCache) fetchAutoAsgNames() ([]string, error) {
-	groupNames := make([]string, 0)
-
-	for _, spec := range m.asgAutoDiscoverySpecs {
-		names, err := m.service.getAutoscalingGroupNamesByTags(spec.Tags)
-		if err != nil {
-			return nil, fmt.Errorf("cannot autodiscover ASGs: %s", err)
-		}
-
-		groupNames = append(groupNames, names...)
+	filters := m.buildFilters()
+	tags, err := m.service.getAutoscalingGroupNamesByTags(filters)
+	if err != nil {
+		return nil, fmt.Errorf("cannot autodiscover ASGs: %s", err)
 	}
 
-	return groupNames, nil
+	asgNames := m.extractAsgNames(tags)
+
+	return asgNames, nil
+}
+
+func (m *asgCache) extractAsgNames(tags []*autoscaling.TagDescription) []string {
+	// According to how DescribeTags API works, the result contains ASGs which
+	// not all but only subset of tags are associated. Explicitly select ASGs to
+	// which all the tags are associated so that we won't end up calling
+	// DescribeAutoScalingGroups API multiple times on an ASG.
+	asgNamesUniq := make(map[string]bool, len(tags))
+	var asgNames []string
+	specIndex := 0
+	asgNameOccurrences := make(map[int]map[string]int, len(m.asgAutoDiscoverySpecs))
+	for _, spec := range m.asgAutoDiscoverySpecs {
+		asgNameOccurrences[specIndex] = make(map[string]int)
+		for _, t := range tags {
+			asgName := aws.StringValue(t.ResourceId)
+			occurrences := asgNameOccurrences[specIndex][asgName] + 1
+			if occurrences >= len(spec.Tags) && !asgNamesUniq[asgName] {
+				asgNamesUniq[asgName] = true
+				asgNames = append(asgNames, asgName)
+			}
+			asgNameOccurrences[specIndex][asgName] = occurrences
+		}
+		specIndex++
+	}
+	return asgNames
+}
+
+func (m *asgCache) buildFilters() []*autoscaling.Filter {
+	// DescribeTags does an OR query when multiple filters on different tags are
+	// specified. In other words, DescribeTags returns [asg1, asg1] for keys
+	// [t1, t2] when there's only one asg tagged both t1 and t2.
+	var filters []*autoscaling.Filter
+	for _, spec := range m.asgAutoDiscoverySpecs {
+		for key, value := range spec.Tags {
+			filter := &autoscaling.Filter{
+				Name:   aws.String("key"),
+				Values: []*string{aws.String(key)},
+			}
+			filters = append(filters, filter)
+			if value != "" {
+				filters = append(filters, &autoscaling.Filter{
+					Name:   aws.String("value"),
+					Values: []*string{aws.String(value)},
+				})
+			}
+		}
+	}
+	return filters
 }
 
 func (m *asgCache) buildAsgNames() ([]string, error) {

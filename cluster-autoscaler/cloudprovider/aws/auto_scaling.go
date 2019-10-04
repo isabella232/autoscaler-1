@@ -94,26 +94,8 @@ func (m *autoScalingWrapper) getAutoscalingGroupsByNames(names []string) ([]*aut
 	return asgs, nil
 }
 
-func (m *autoScalingWrapper) getAutoscalingGroupNamesByTags(kvs map[string]string) ([]string, error) {
-	// DescribeTags does an OR query when multiple filters on different tags are
-	// specified. In other words, DescribeTags returns [asg1, asg1] for keys
-	// [t1, t2] when there's only one asg tagged both t1 and t2.
-	filters := []*autoscaling.Filter{}
-	for key, value := range kvs {
-		filter := &autoscaling.Filter{
-			Name:   aws.String("key"),
-			Values: []*string{aws.String(key)},
-		}
-		filters = append(filters, filter)
-		if value != "" {
-			filters = append(filters, &autoscaling.Filter{
-				Name:   aws.String("value"),
-				Values: []*string{aws.String(value)},
-			})
-		}
-	}
-
-	tags := []*autoscaling.TagDescription{}
+func (m *autoScalingWrapper) getAutoscalingGroupNamesByTags(filters []*autoscaling.Filter) ([]*autoscaling.TagDescription, error) {
+	var tags []*autoscaling.TagDescription
 	input := &autoscaling.DescribeTagsInput{
 		Filters:    filters,
 		MaxRecords: aws.Int64(maxRecordsReturnedByAPI),
@@ -127,20 +109,5 @@ func (m *autoScalingWrapper) getAutoscalingGroupNamesByTags(kvs map[string]strin
 		return nil, err
 	}
 
-	// According to how DescribeTags API works, the result contains ASGs which
-	// not all but only subset of tags are associated. Explicitly select ASGs to
-	// which all the tags are associated so that we won't end up calling
-	// DescribeAutoScalingGroups API multiple times on an ASG.
-	asgNames := []string{}
-	asgNameOccurrences := make(map[string]int)
-	for _, t := range tags {
-		asgName := aws.StringValue(t.ResourceId)
-		occurrences := asgNameOccurrences[asgName] + 1
-		if occurrences >= len(kvs) {
-			asgNames = append(asgNames, asgName)
-		}
-		asgNameOccurrences[asgName] = occurrences
-	}
-
-	return asgNames, nil
+	return tags, nil
 }
