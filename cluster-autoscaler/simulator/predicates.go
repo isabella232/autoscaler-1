@@ -124,7 +124,7 @@ func NewPredicateChecker(kubeClient kube_client.Interface, stop <-chan struct{})
 	serviceInformer := informerFactory.Core().V1().Services()
 	pdbInformer := informerFactory.Policy().V1beta1().PodDisruptionBudgets()
 	storageClassInformer := informerFactory.Storage().V1().StorageClasses()
-	csiNodeInformer := informerFactory.Storage().V1beta1().CSINodes()
+	csiNodeInformer := informers.NewSharedInformerFactory(kubeClient, 0).Storage().V1beta1().CSINodes()
 
 	configurator := factory.NewConfigFactory(&factory.ConfigFactoryArgs{
 		Client:                         kubeClient,

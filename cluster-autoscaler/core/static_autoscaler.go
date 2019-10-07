@@ -433,10 +433,22 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 			}
 		}
 
-		scaleDownInCooldown := a.processorCallbacks.disableScaleDownForLoop ||
-			a.lastScaleUpTime.Add(a.ScaleDownDelayAfterAdd).After(currentTime) ||
-			a.lastScaleDownFailTime.Add(a.ScaleDownDelayAfterFailure).After(currentTime) ||
-			a.lastScaleDownDeleteTime.Add(a.ScaleDownDelayAfterDelete).After(currentTime)
+		scaleDownInCooldown := false
+		switch {
+		case a.processorCallbacks.disableScaleDownForLoop:
+			scaleDownInCooldown = true
+			klog.V(4).Info("disableScaleDownForLoop")
+		case a.lastScaleUpTime.Add(a.ScaleDownDelayAfterAdd).After(currentTime):
+			scaleDownInCooldown = true
+			klog.V(4).Infof("lastScaleUpTime: %v", a.lastScaleUpTime.Add(a.ScaleDownDelayAfterAdd))
+		case a.lastScaleDownFailTime.Add(a.ScaleDownDelayAfterFailure).After(currentTime):
+			scaleDownInCooldown = true
+			klog.V(4).Infof("lastScaleDownFailTime: %v", a.lastScaleDownFailTime.Add(a.ScaleDownDelayAfterFailure))
+		case a.lastScaleDownDeleteTime.Add(a.ScaleDownDelayAfterDelete).After(currentTime):
+			scaleDownInCooldown = true
+			klog.V(4).Infof("lastScaleDownDeleteTime: %v", a.lastScaleDownDeleteTime.Add(a.ScaleDownDelayAfterDelete))
+		}
+
 		// In dry run only utilization is updated
 		calculateUnneededOnly := scaleDownInCooldown || scaleDown.nodeDeletionTracker.IsNonEmptyNodeDeleteInProgress()
 
