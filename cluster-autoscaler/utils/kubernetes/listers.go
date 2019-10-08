@@ -17,12 +17,16 @@ limitations under the License.
 package kubernetes
 
 import (
+	"github.com/coreos/prometheus-operator/pkg/listwatch"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	client "k8s.io/client-go/kubernetes"
@@ -82,17 +86,17 @@ func NewListerRegistry(allNode NodeLister, readyNode NodeLister, scheduledPod Po
 }
 
 // NewListerRegistryWithDefaultListers returns a registry filled with listers of the default implementations
-func NewListerRegistryWithDefaultListers(kubeClient client.Interface, stopChannel <-chan struct{}) ListerRegistry {
-	unschedulablePodLister := NewUnschedulablePodLister(kubeClient, apiv1.NamespaceAll, stopChannel)
-	scheduledPodLister := NewScheduledPodLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+func NewListerRegistryWithDefaultListers(kubeClient client.Interface, namespaces []string, stopChannel <-chan struct{}) ListerRegistry {
+	unschedulablePodLister := NewUnschedulablePodLister(kubeClient, namespaces, stopChannel)
+	scheduledPodLister := NewScheduledPodLister(kubeClient, namespaces, stopChannel)
 	readyNodeLister := NewReadyNodeLister(kubeClient, stopChannel)
 	allNodeLister := NewAllNodeLister(kubeClient, stopChannel)
-	podDisruptionBudgetLister := NewPodDisruptionBudgetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	podDisruptionBudgetLister := NewPodDisruptionBudgetLister(kubeClient, namespaces, stopChannel)
 	daemonSetLister := NewDaemonSetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
-	replicationControllerLister := NewReplicationControllerLister(kubeClient, apiv1.NamespaceAll, stopChannel)
-	jobLister := NewJobLister(kubeClient, apiv1.NamespaceAll, stopChannel)
-	replicaSetLister := NewReplicaSetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
-	statefulSetLister := NewStatefulSetLister(kubeClient, apiv1.NamespaceAll, stopChannel)
+	replicationControllerLister := NewReplicationControllerLister(kubeClient, namespaces, stopChannel)
+	jobLister := NewJobLister(kubeClient, namespaces, stopChannel)
+	replicaSetLister := NewReplicaSetLister(kubeClient, namespaces, stopChannel)
+	statefulSetLister := NewStatefulSetLister(kubeClient, namespaces, stopChannel)
 	return NewListerRegistry(allNodeLister, readyNodeLister, scheduledPodLister,
 		unschedulablePodLister, podDisruptionBudgetLister, daemonSetLister,
 		replicationControllerLister, jobLister, replicaSetLister, statefulSetLister)
@@ -175,16 +179,31 @@ func (unschedulablePodLister *UnschedulablePodLister) List() ([]*apiv1.Pod, erro
 }
 
 // NewUnschedulablePodLister returns a lister providing pods that failed to be scheduled.
-func NewUnschedulablePodLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodLister {
+func NewUnschedulablePodLister(kubeClient client.Interface, namespace []string, stopchannel <-chan struct{}) PodLister {
 	return NewUnschedulablePodInNamespaceLister(kubeClient, namespace, stopchannel)
 }
 
 // NewUnschedulablePodInNamespaceLister returns a lister providing pods that failed to be scheduled in the given namespace.
-func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodLister {
+func NewUnschedulablePodInNamespaceLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) PodLister {
 	// watch unscheduled pods
 	selector := fields.ParseSelectorOrDie("spec.nodeName==" + "" + ",status.phase!=" +
 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
-	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
+	optionsModifier := func(options *metav1.ListOptions) {
+		options.FieldSelector = selector.String()
+	}
+	podListWatch := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				optionsModifier(&options)
+				return kubeClient.CoreV1().Pods(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				optionsModifier(&options)
+				return kubeClient.CoreV1().Pods(namespace).Watch(options)
+			},
+		}
+	})
 	store := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 
 	podLister := v1lister.NewPodLister(store)
@@ -206,11 +225,26 @@ func (lister *ScheduledPodLister) List() ([]*apiv1.Pod, error) {
 }
 
 // NewScheduledPodLister builds ScheduledPodLister
-func NewScheduledPodLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodLister {
+func NewScheduledPodLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) PodLister {
 	// watch unscheduled pods
 	selector := fields.ParseSelectorOrDie("spec.nodeName!=" + "" + ",status.phase!=" +
 		string(apiv1.PodSucceeded) + ",status.phase!=" + string(apiv1.PodFailed))
-	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
+	optionsModifier := func(options *metav1.ListOptions) {
+		options.FieldSelector = selector.String()
+	}
+	podListWatch := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				optionsModifier(&options)
+				return kubeClient.CoreV1().Pods(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				optionsModifier(&options)
+				return kubeClient.CoreV1().Pods(namespace).Watch(options)
+			},
+		}
+	})
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(podListWatch, &apiv1.Pod{}, time.Hour)
 	podLister := v1lister.NewPodLister(store)
 	go reflector.Run(stopchannel)
@@ -298,10 +332,21 @@ func (lister *PodDisruptionBudgetListerImpl) List() ([]*policyv1.PodDisruptionBu
 }
 
 // NewPodDisruptionBudgetLister builds a pod disruption budget lister.
-func NewPodDisruptionBudgetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) PodDisruptionBudgetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.PolicyV1beta1().RESTClient(), "poddisruptionbudgets", namespace, fields.Everything())
+func NewPodDisruptionBudgetLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) PodDisruptionBudgetLister {
+	listWatcher := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return kubeClient.PolicyV1beta1().PodDisruptionBudgets(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return kubeClient.PolicyV1beta1().PodDisruptionBudgets(namespace).Watch(options)
+			},
+		}
+	})
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &policyv1.PodDisruptionBudget{}, time.Hour)
 	pdbLister := v1policylister.NewPodDisruptionBudgetLister(store)
+
 	go reflector.Run(stopchannel)
 	return &PodDisruptionBudgetListerImpl{
 		pdbLister: pdbLister,
@@ -318,8 +363,18 @@ func NewDaemonSetLister(kubeClient client.Interface, namespace string, stopchann
 }
 
 // NewReplicationControllerLister builds a replicationcontroller lister.
-func NewReplicationControllerLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1lister.ReplicationControllerLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "replicationcontrollers", namespace, fields.Everything())
+func NewReplicationControllerLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) v1lister.ReplicationControllerLister {
+	listWatcher := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return kubeClient.CoreV1().ReplicationControllers(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return kubeClient.CoreV1().ReplicationControllers(namespace).Watch(options)
+			},
+		}
+	})
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &apiv1.ReplicationController{}, time.Hour)
 	lister := v1lister.NewReplicationControllerLister(store)
 	go reflector.Run(stopchannel)
@@ -327,8 +382,18 @@ func NewReplicationControllerLister(kubeClient client.Interface, namespace strin
 }
 
 // NewJobLister builds a job lister.
-func NewJobLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1batchlister.JobLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.BatchV1().RESTClient(), "jobs", namespace, fields.Everything())
+func NewJobLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) v1batchlister.JobLister {
+	listWatcher := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return kubeClient.BatchV1().Jobs(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return kubeClient.BatchV1().Jobs(namespace).Watch(options)
+			},
+		}
+	})
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &batchv1.Job{}, time.Hour)
 	lister := v1batchlister.NewJobLister(store)
 	go reflector.Run(stopchannel)
@@ -336,8 +401,18 @@ func NewJobLister(kubeClient client.Interface, namespace string, stopchannel <-c
 }
 
 // NewReplicaSetLister builds a replicaset lister.
-func NewReplicaSetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1appslister.ReplicaSetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "replicasets", namespace, fields.Everything())
+func NewReplicaSetLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) v1appslister.ReplicaSetLister {
+	listWatcher := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return kubeClient.AppsV1().ReplicaSets(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return kubeClient.AppsV1().ReplicaSets(namespace).Watch(options)
+			},
+		}
+	})
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &appsv1.ReplicaSet{}, time.Hour)
 	lister := v1appslister.NewReplicaSetLister(store)
 	go reflector.Run(stopchannel)
@@ -345,8 +420,18 @@ func NewReplicaSetLister(kubeClient client.Interface, namespace string, stopchan
 }
 
 // NewStatefulSetLister builds a statefulset lister.
-func NewStatefulSetLister(kubeClient client.Interface, namespace string, stopchannel <-chan struct{}) v1appslister.StatefulSetLister {
-	listWatcher := cache.NewListWatchFromClient(kubeClient.AppsV1().RESTClient(), "statefulsets", namespace, fields.Everything())
+func NewStatefulSetLister(kubeClient client.Interface, ns []string, stopchannel <-chan struct{}) v1appslister.StatefulSetLister {
+	listWatcher := listwatch.MultiNamespaceListerWatcher(nil, ns, []string{}, func(namespace string) cache.ListerWatcher {
+		return &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return kubeClient.AppsV1().StatefulSets(namespace).List(options)
+
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return kubeClient.AppsV1().StatefulSets(namespace).Watch(options)
+			},
+		}
+	})
 	store, reflector := cache.NewNamespaceKeyedIndexerAndReflector(listWatcher, &appsv1.StatefulSet{}, time.Hour)
 	lister := v1appslister.NewStatefulSetLister(store)
 	go reflector.Run(stopchannel)

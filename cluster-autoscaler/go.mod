@@ -66,8 +66,6 @@ require (
 	github.com/imdario/mergo v0.3.6 // indirect
 	github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af
 	github.com/json-iterator/go v1.1.5
-	github.com/onsi/ginkgo v1.7.0 // indirect
-	github.com/onsi/gomega v1.4.3 // indirect
 	github.com/prometheus/client_golang v0.9.3-0.20190127221311-3c4408c8b829
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/pflag v1.0.3
