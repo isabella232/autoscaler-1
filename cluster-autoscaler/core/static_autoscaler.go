@@ -191,21 +191,25 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 
 	klog.V(4).Info("Starting main loop")
 
-	stateUpdateStart := time.Now()
+	start := time.Now()
 	allNodes, readyNodes, typedErr := a.obtainNodeLists(a.CloudProvider)
 	if typedErr != nil {
 		klog.Errorf("Failed to get node list: %v", typedErr)
 		return typedErr
 	}
+	metrics.UpdateDurationFromStart(metrics.ObtainNodeList, start)
+
 	if a.actOnEmptyCluster(allNodes, readyNodes, currentTime) {
 		return nil
 	}
 
+	start = time.Now()
 	daemonsets, err := a.ListerRegistry.DaemonSetLister().List(labels.Everything())
 	if err != nil {
 		klog.Errorf("Failed to get daemonset list: %v", err)
 		return errors.ToAutoscalerError(errors.ApiCallError, err)
 	}
+	metrics.UpdateDurationFromStart(metrics.DaemonsetList, start)
 
 	// Call CloudProvider.Refresh before any other calls to cloud provider.
 	err = a.AutoscalingContext.CloudProvider.Refresh()
@@ -213,20 +217,24 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 		klog.Errorf("Failed to refresh cloud provider config: %v", err)
 		return errors.ToAutoscalerError(errors.CloudProviderError, err)
 	}
+	metrics.UpdateDurationFromStart(metrics.CloudProviderRefresh, start)
 
+	start = time.Now()
 	nodeInfosForGroups, autoscalerError := getNodeInfosForGroups(
 		readyNodes, a.nodeInfoCache, autoscalingContext.CloudProvider, autoscalingContext.ListerRegistry, daemonsets, autoscalingContext.PredicateChecker, a.ignoredTaints)
 	if autoscalerError != nil {
 		klog.Errorf("Failed to get node infos for groups: %v", autoscalerError)
 		return autoscalerError.AddPrefix("failed to build node infos for node groups: ")
 	}
+	metrics.UpdateDurationFromStart(metrics.GetNodeInfosForGroups, start)
 
+	start = time.Now()
 	typedErr = a.updateClusterState(allNodes, nodeInfosForGroups, currentTime)
 	if typedErr != nil {
 		klog.Errorf("Failed to update cluster state: %v", typedErr)
 		return typedErr
 	}
-	metrics.UpdateDurationFromStart(metrics.UpdateState, stateUpdateStart)
+	metrics.UpdateDurationFromStart(metrics.UpdateClusterState, start)
 
 	scaleUpStatus := &status.ScaleUpStatus{Result: status.ScaleUpNotTried}
 	scaleUpStatusProcessorAlreadyCalled := false
