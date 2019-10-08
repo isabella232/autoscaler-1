@@ -38,8 +38,8 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/utils/backoff"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/deletetaint"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
-	"k8s.io/autoscaler/cluster-autoscaler/utils/gpu"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/tpu"
+	"k8s.io/autoscaler/cluster-autoscaler/utils/volume"
 
 	"k8s.io/klog"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
@@ -441,20 +441,20 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 			}
 		}
 
-		scaleDownInCooldown := false
+		// TODO: this is easier to understand why we don't scale down
+		scaleDownInCooldown := true
 		switch {
 		case a.processorCallbacks.disableScaleDownForLoop:
-			scaleDownInCooldown = true
 			klog.V(4).Info("disableScaleDownForLoop")
 		case a.lastScaleUpTime.Add(a.ScaleDownDelayAfterAdd).After(currentTime):
-			scaleDownInCooldown = true
 			klog.V(4).Infof("lastScaleUpTime: %v", a.lastScaleUpTime.Add(a.ScaleDownDelayAfterAdd))
 		case a.lastScaleDownFailTime.Add(a.ScaleDownDelayAfterFailure).After(currentTime):
-			scaleDownInCooldown = true
 			klog.V(4).Infof("lastScaleDownFailTime: %v", a.lastScaleDownFailTime.Add(a.ScaleDownDelayAfterFailure))
 		case a.lastScaleDownDeleteTime.Add(a.ScaleDownDelayAfterDelete).After(currentTime):
-			scaleDownInCooldown = true
 			klog.V(4).Infof("lastScaleDownDeleteTime: %v", a.lastScaleDownDeleteTime.Add(a.ScaleDownDelayAfterDelete))
+		default:
+			klog.V(4).Infof("scaleDownNotInCooldown")
+			scaleDownInCooldown = false
 		}
 
 		// In dry run only utilization is updated
@@ -608,7 +608,14 @@ func (a *StaticAutoscaler) obtainNodeLists(cp cloudprovider.CloudProvider) ([]*a
 	// Treat those nodes as unready until GPU actually becomes available and let
 	// our normal handling for booting up nodes deal with this.
 	// TODO: Remove this call when we handle dynamically provisioned resources.
-	allNodes, readyNodes = gpu.FilterOutNodesWithUnreadyGpus(cp.GPULabel(), allNodes, readyNodes)
+	//allNodes, readyNodes = gpu.FilterOutNodesWithUnreadyGpus(cp.GPULabel(), allNodes, readyNodes) // save time as we don't have GPU
+
+	pods, err := a.ListerRegistry.ScheduledPodLister().List()
+	if err != nil {
+		klog.Errorf("Failed to list scheduled pods: %v", err)
+		return nil, nil, errors.ToAutoscalerError(errors.ApiCallError, err)
+	}
+	allNodes, readyNodes = volume.FilterOutNodesWithUnreadyLocalVolume(pods, allNodes, readyNodes)
 	return allNodes, readyNodes, nil
 }
 

@@ -465,11 +465,11 @@ func (sd *ScaleDown) UpdateUnneededNodes(
 		if err != nil {
 			klog.Warningf("Failed to calculate utilization for %s: %v", node.Name, err)
 		}
-		klog.V(4).Infof("Node %s - %s utilization %f", node.Name, utilInfo.ResourceName, utilInfo.Utilization)
+		klog.V(5).Infof("Node %s - %s utilization %f", node.Name, utilInfo.ResourceName, utilInfo.Utilization)
 		utilizationMap[node.Name] = utilInfo
 
 		if !sd.isNodeBelowUtilzationThreshold(node, utilInfo) {
-			klog.V(4).Infof("Node %s is not suitable for removal - %s utilization too big (%f)", node.Name, utilInfo.ResourceName, utilInfo.Utilization)
+			klog.V(5).Infof("Node %s is not suitable for removal - %s utilization too big (%f)", node.Name, utilInfo.ResourceName, utilInfo.Utilization)
 			continue
 		}
 		currentlyUnneededNodes = append(currentlyUnneededNodes, node)
