@@ -18,10 +18,13 @@ package aws
 
 import (
 	"fmt"
-
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 	"k8s.io/klog"
+	"sync"
+	"time"
 )
 
 // autoScaling is the interface represents a specific aspect of the auto-scaling service provided by AWS SDK for use in CA
@@ -36,10 +39,71 @@ type autoScaling interface {
 // autoScalingWrapper provides several utility methods over the auto-scaling service provided by AWS SDK
 type autoScalingWrapper struct {
 	autoScaling
+	lcMu                                 sync.Mutex
 	launchConfigurationInstanceTypeCache map[string]string
 }
 
+func (m autoScalingWrapper) populateLaunchConfigurationInstanceTypeCache(autoscalingGroups []*autoscaling.Group) error {
+	m.lcMu.Lock()
+	defer m.lcMu.Unlock()
+	launchToInstanceType := make(map[string]string)
+
+	var launchConfigToQuery []*string
+
+	for _, asg := range autoscalingGroups {
+		i, ok := m.launchConfigurationInstanceTypeCache[*asg.LaunchConfigurationName]
+		if ok {
+			launchToInstanceType[*asg.LaunchConfigurationName] = i
+			continue
+		}
+		launchConfigToQuery = append(launchConfigToQuery, asg.LaunchConfigurationName)
+	}
+	if len(launchConfigToQuery) == 0 {
+		klog.V(4).Infof("%d launch configurations already in cache", len(autoscalingGroups))
+		return nil
+	}
+	klog.V(4).Infof("%d launch configurations to query", len(launchConfigToQuery))
+
+	alreadyRetry := false
+	for i := 0; i < len(launchConfigToQuery); i += 50 {
+		end := i + 50
+
+		if end > len(launchConfigToQuery) {
+			end = len(launchConfigToQuery)
+		}
+		for {
+			params := &autoscaling.DescribeLaunchConfigurationsInput{
+				LaunchConfigurationNames: launchConfigToQuery[i:end],
+				MaxRecords:               aws.Int64(50),
+			}
+			start := time.Now()
+			r, err := m.DescribeLaunchConfigurations(params)
+			metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchConfigurations", err == nil, start)
+			if err == nil {
+				for _, lc := range r.LaunchConfigurations {
+					launchToInstanceType[*lc.LaunchConfigurationName] = *lc.InstanceType
+					m.launchConfigurationInstanceTypeCache[*lc.LaunchConfigurationName] = *lc.InstanceType
+				}
+				break
+			}
+			if !alreadyRetry && request.IsErrorThrottle(err) {
+				alreadyRetry = true
+				klog.Warningf("DescribeLaunchConfigurations retry: %v", err)
+				continue
+			}
+			return err
+		}
+	}
+
+	klog.V(4).Infof("Successfully updated %d launch configurations, replacing current launch configuration cache from %d to %d", len(launchConfigToQuery), len(m.launchConfigurationInstanceTypeCache), len(launchToInstanceType))
+	m.launchConfigurationInstanceTypeCache = launchToInstanceType
+	return nil
+}
+
 func (m autoScalingWrapper) getInstanceTypeByLCName(name string) (string, error) {
+	m.lcMu.Lock()
+	defer m.lcMu.Unlock()
+
 	if instanceType, found := m.launchConfigurationInstanceTypeCache[name]; found {
 		return instanceType, nil
 	}
@@ -48,7 +112,9 @@ func (m autoScalingWrapper) getInstanceTypeByLCName(name string) (string, error)
 		LaunchConfigurationNames: []*string{aws.String(name)},
 		MaxRecords:               aws.Int64(1),
 	}
+	start := time.Now()
 	launchConfigurations, err := m.DescribeLaunchConfigurations(params)
+	metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchConfigurations", err == nil, start)
 	if err != nil {
 		klog.V(4).Infof("Failed LaunchConfiguration info request for %s: %v", name, err)
 		return "", err
@@ -56,7 +122,6 @@ func (m autoScalingWrapper) getInstanceTypeByLCName(name string) (string, error)
 	if len(launchConfigurations.LaunchConfigurations) < 1 {
 		return "", fmt.Errorf("unable to get first LaunchConfiguration for %s", name)
 	}
-
 	instanceType := *launchConfigurations.LaunchConfigurations[0].InstanceType
 	m.launchConfigurationInstanceTypeCache[name] = instanceType
 	return instanceType, nil
@@ -67,7 +132,8 @@ func (m *autoScalingWrapper) getAutoscalingGroupsByNames(names []string) ([]*aut
 		return nil, nil
 	}
 
-	asgs := make([]*autoscaling.Group, 0)
+	var asgs []*autoscaling.Group
+	alreadyRetry := false
 
 	// AWS only accepts up to 50 ASG names as input, describe them in batches
 	for i := 0; i < len(names); i += maxAsgNamesPerDescribe {
@@ -77,16 +143,27 @@ func (m *autoScalingWrapper) getAutoscalingGroupsByNames(names []string) ([]*aut
 			end = len(names)
 		}
 
-		input := &autoscaling.DescribeAutoScalingGroupsInput{
-			AutoScalingGroupNames: aws.StringSlice(names[i:end]),
-			MaxRecords:            aws.Int64(maxRecordsReturnedByAPI),
-		}
-		if err := m.DescribeAutoScalingGroupsPages(input, func(output *autoscaling.DescribeAutoScalingGroupsOutput, _ bool) bool {
-			asgs = append(asgs, output.AutoScalingGroups...)
-			// We return true while we want to be called with the next page of
-			// results, if any.
-			return true
-		}); err != nil {
+		for {
+			input := &autoscaling.DescribeAutoScalingGroupsInput{
+				AutoScalingGroupNames: aws.StringSlice(names[i:end]),
+				MaxRecords:            aws.Int64(maxAsgNamesPerDescribe),
+			}
+			start := time.Now()
+			err := m.DescribeAutoScalingGroupsPages(input, func(output *autoscaling.DescribeAutoScalingGroupsOutput, _ bool) bool {
+				asgs = append(asgs, output.AutoScalingGroups...)
+				// We return true while we want to be called with the next page of
+				// results, if any.
+				return true
+			})
+			metrics.ObserveCloudProviderQuery("aws", "DescribeAutoScalingGroupsPages", err == nil, start)
+			if err == nil {
+				break
+			}
+			if !alreadyRetry && request.IsErrorThrottle(err) {
+				alreadyRetry = true
+				klog.Warningf("DescribeAutoScalingGroupsPages retry: %v", err)
+				continue
+			}
 			return nil, err
 		}
 	}
@@ -118,12 +195,15 @@ func (m *autoScalingWrapper) getAutoscalingGroupNamesByTags(kvs map[string]strin
 		Filters:    filters,
 		MaxRecords: aws.Int64(maxRecordsReturnedByAPI),
 	}
-	if err := m.DescribeTagsPages(input, func(out *autoscaling.DescribeTagsOutput, _ bool) bool {
+	start := time.Now()
+	err := m.DescribeTagsPages(input, func(out *autoscaling.DescribeTagsOutput, _ bool) bool {
 		tags = append(tags, out.Tags...)
 		// We return true while we want to be called with the next page of
 		// results, if any.
 		return true
-	}); err != nil {
+	})
+	metrics.ObserveCloudProviderQuery("aws", "DescribeTagsPages", err == nil, start)
+	if err != nil {
 		return nil, err
 	}
 

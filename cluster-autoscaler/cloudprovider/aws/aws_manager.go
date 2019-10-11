@@ -187,7 +187,10 @@ func createAWSManagerInternal(
 			WithEndpointResolver(getResolver(awsSdkProvider.cfg)))
 
 		if autoScalingService == nil {
-			autoScalingService = &autoScalingWrapper{autoscaling.New(sess), map[string]string{}}
+			autoScalingService = &autoScalingWrapper{
+				autoScaling: autoscaling.New(sess),
+				launchConfigurationInstanceTypeCache: make(map[string]string),
+			}
 		}
 
 		if ec2Service == nil {
@@ -319,25 +322,25 @@ func (m *AwsManager) getAsgTemplate(asg *asg) (*asgTemplate, error) {
 }
 
 func (m *AwsManager) buildInstanceType(asg *asg) (string, error) {
-	if asg.LaunchConfigurationName != "" {
-		return m.autoScalingService.getInstanceTypeByLCName(asg.LaunchConfigurationName)
-	} else if asg.LaunchTemplate != nil {
+	switch {
+	case asg.LaunchTemplate != nil:
 		return m.ec2Service.getInstanceTypeByLT(asg.LaunchTemplate)
-	} else if asg.MixedInstancesPolicy != nil {
+	case asg.LaunchConfigurationName != "":
+		return m.autoScalingService.getInstanceTypeByLCName(asg.LaunchConfigurationName)
+	case asg.MixedInstancesPolicy != nil:
 		// always use first instance
 		if len(asg.MixedInstancesPolicy.instanceTypesOverrides) != 0 {
 			return asg.MixedInstancesPolicy.instanceTypesOverrides[0], nil
 		}
-
 		return m.ec2Service.getInstanceTypeByLT(asg.MixedInstancesPolicy.launchTemplate)
+	default:
+		return "", errors.New("unable to get instance type from launch config or launch template")
 	}
-
-	return "", errors.New("Unable to get instance type from launch config or launch template")
 }
 
 func (m *AwsManager) buildNodeFromTemplate(asg *asg, template *asgTemplate) (*apiv1.Node, error) {
 	node := apiv1.Node{}
-	nodeName := fmt.Sprintf("%s-asg-%d", asg.Name, rand.Int63())
+	nodeName := fmt.Sprintf("%s-%d", asg.Name, rand.Int63())
 
 	node.ObjectMeta = metav1.ObjectMeta{
 		Name:     nodeName,

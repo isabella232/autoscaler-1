@@ -18,9 +18,11 @@ package aws
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 )
 
 type ec2I interface {
@@ -37,7 +39,9 @@ func (m ec2Wrapper) getInstanceTypeByLT(launchTemplate *launchTemplate) (string,
 		Versions:           []*string{aws.String(launchTemplate.version)},
 	}
 
+	start := time.Now()
 	describeData, err := m.DescribeLaunchTemplateVersions(params)
+	metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchTemplateVersions", err == nil , start)
 	if err != nil {
 		return "", err
 	}

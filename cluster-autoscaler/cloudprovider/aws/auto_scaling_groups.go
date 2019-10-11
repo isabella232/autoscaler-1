@@ -18,10 +18,12 @@ package aws
 
 import (
 	"fmt"
+	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/config/dynamic"
@@ -219,7 +221,9 @@ func (m *asgCache) setAsgSizeNoLock(asg *asg, size int) error {
 		HonorCooldown:        aws.Bool(false),
 	}
 	klog.V(0).Infof("Setting asg %s size to %d", asg.Name, size)
+	start := time.Now()
 	_, err := m.service.SetDesiredCapacity(params)
+	metrics.ObserveCloudProviderQuery("aws", "SetDesiredCapacity", err == nil, start)
 	if err != nil {
 		return err
 	}
@@ -272,7 +276,9 @@ func (m *asgCache) DeleteInstances(instances []*AwsInstanceRef) error {
 				InstanceId:                     aws.String(instance.Name),
 				ShouldDecrementDesiredCapacity: aws.Bool(true),
 			}
+			start := time.Now()
 			resp, err := m.service.TerminateInstanceInAutoScalingGroup(params)
+			metrics.ObserveCloudProviderQuery("aws", "TerminateInstanceInAutoScalingGroup", err == nil, start)
 			if err != nil {
 				return err
 			}
@@ -355,6 +361,14 @@ func (m *asgCache) regenerate() error {
 	groups, err := m.service.getAutoscalingGroupsByNames(refreshNames)
 	if err != nil {
 		return err
+	}
+	var launchConfigNames []*string
+	for _, group := range groups {
+		launchConfigNames = append(launchConfigNames, group.LaunchConfigurationName)
+	}
+	err = m.service.populateLaunchConfigurationInstanceTypeCache(groups)
+	if err != nil {
+		klog.Warningf("Failed to fully populate all launchConfigurations: %v", err)
 	}
 
 	// If currently any ASG has more Desired than running Instances, introduce placeholders

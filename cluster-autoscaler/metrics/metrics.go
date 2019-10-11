@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"strconv"
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
@@ -86,7 +87,7 @@ const (
 	ObtainNodeList             FunctionLabel = "obtainNodeList"
 	DaemonsetList              FunctionLabel = "daemonsetList"
 	CloudProviderRefresh       FunctionLabel = "cloudProviderRefresh"
-	GetNodeInfosForGroups       FunctionLabel = "getNodeInfosForGroups"
+	GetNodeInfosForGroups      FunctionLabel = "getNodeInfosForGroups"
 	FilterOutSchedulable       FunctionLabel = "filterOutSchedulable"
 	Main                       FunctionLabel = "main"
 	Poll                       FunctionLabel = "poll"
@@ -204,6 +205,16 @@ var (
 		}, []string{"reason", "gpu_name"},
 	)
 
+	cloudProviderQuery = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Namespace: caNamespace,
+			Name:      "cloud_provider_query_seconds",
+			Help:      "Quantiles of time taken by cloud provider query by method and success in seconds",
+			MaxAge:    time.Hour,
+		},
+		[]string{"cloud", "method", "success"},
+	)
+
 	evictionsCount = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: caNamespace,
@@ -275,6 +286,7 @@ func RegisterAll() {
 	prometheus.MustRegister(napEnabled)
 	prometheus.MustRegister(nodeGroupCreationCount)
 	prometheus.MustRegister(nodeGroupDeletionCount)
+	prometheus.MustRegister(cloudProviderQuery)
 }
 
 // UpdateDurationFromStart records the duration of the step identified by the
@@ -393,4 +405,8 @@ func UpdateScaleDownInCooldown(inCooldown bool) {
 	} else {
 		scaleDownInCooldown.Set(0.0)
 	}
+}
+
+func ObserveCloudProviderQuery(cloud, method string, success bool, start time.Time) {
+	cloudProviderQuery.WithLabelValues(cloud, method, strconv.FormatBool(success)).Observe(time.Now().Sub(start).Seconds())
 }
