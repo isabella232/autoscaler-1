@@ -245,52 +245,52 @@ func getNodeInfosForGroups(nodes []*apiv1.Node, nodeInfoCache map[string]*schedu
 	result := make(map[string]*schedulernodeinfo.NodeInfo)
 	seenGroups := make(map[string]bool)
 
-	podsForNodes, err := getPodsForNodes(listers)
-	if err != nil {
-		return map[string]*schedulernodeinfo.NodeInfo{}, err
-	}
+	//podsForNodes, err := getPodsForNodes(listers)
+	//if err != nil {
+	//	return map[string]*schedulernodeinfo.NodeInfo{}, err
+	//}
 
-	// processNode returns information whether the nodeTemplate was generated and if there was an error.
-	processNode := func(node *apiv1.Node) (bool, string, errors.AutoscalerError) {
-		nodeGroup, err := cloudProvider.NodeGroupForNode(node)
-		if err != nil {
-			return false, "", errors.ToAutoscalerError(errors.CloudProviderError, err)
-		}
-		if nodeGroup == nil || reflect.ValueOf(nodeGroup).IsNil() {
-			return false, "", nil
-		}
-		id := nodeGroup.Id()
-		if _, found := result[id]; !found {
-			// Build nodeInfo.
-			nodeInfo, err := simulator.BuildNodeInfoForNode(node, podsForNodes)
-			if err != nil {
-				return false, "", err
-			}
-			sanitizedNodeInfo, err := sanitizeNodeInfo(nodeInfo, id, ignoredTaints)
-			if err != nil {
-				return false, "", err
-			}
-			result[id] = sanitizedNodeInfo
-			return true, id, nil
-		}
-		return false, "", nil
-	}
+	//processNode returns information whether the nodeTemplate was generated and if there was an error.
+	//processNode := func(node *apiv1.Node) (bool, string, errors.AutoscalerError) {
+	//	nodeGroup, err := cloudProvider.NodeGroupForNode(node)
+	//	if err != nil {
+	//		return false, "", errors.ToAutoscalerError(errors.CloudProviderError, err)
+	//	}
+	//	if nodeGroup == nil || reflect.ValueOf(nodeGroup).IsNil() {
+	//		return false, "", nil
+	//	}
+	//	id := nodeGroup.Id()
+	//	if _, found := result[id]; !found {
+	//		// Build nodeInfo.
+	//		nodeInfo, err := simulator.BuildNodeInfoForNode(node, podsForNodes)
+	//		if err != nil {
+	//			return false, "", err
+	//		}
+	//		sanitizedNodeInfo, err := sanitizeNodeInfo(nodeInfo, id, ignoredTaints)
+	//		if err != nil {
+	//			return false, "", err
+	//		}
+	//		result[id] = sanitizedNodeInfo
+	//		return true, id, nil
+	//	}
+	//	return false, "", nil
+	//}
 
-	for _, node := range nodes {
-		// Broken nodes might have some stuff missing. Skipping.
-		if !kube_util.IsNodeReadyAndSchedulable(node) {
-			continue
-		}
-		added, id, typedErr := processNode(node)
-		if typedErr != nil {
-			return map[string]*schedulernodeinfo.NodeInfo{}, typedErr
-		}
-		if added && nodeInfoCache != nil {
-			if nodeInfoCopy, err := deepCopyNodeInfo(result[id]); err == nil {
-				nodeInfoCache[id] = nodeInfoCopy
-			}
-		}
-	}
+	//for _, node := range nodes {
+	//	// Broken nodes might have some stuff missing. Skipping.
+	//	if !kube_util.IsNodeReadyAndSchedulable(node) {
+	//		continue
+	//	}
+	//	added, id, typedErr := processNode(node)
+	//	if typedErr != nil {
+	//		return map[string]*schedulernodeinfo.NodeInfo{}, typedErr
+	//	}
+	//	if added && nodeInfoCache != nil {
+	//		if nodeInfoCopy, err := deepCopyNodeInfo(result[id]); err == nil {
+	//			nodeInfoCache[id] = nodeInfoCopy
+	//		}
+	//	}
+	//}
 	for _, nodeGroup := range cloudProvider.NodeGroups() {
 		id := nodeGroup.Id()
 		seenGroups[id] = true
@@ -300,14 +300,14 @@ func getNodeInfosForGroups(nodes []*apiv1.Node, nodeInfoCache map[string]*schedu
 		//}
 
 		// No good template, check cache of previously running nodes.
-		//if nodeInfoCache != nil {
-		//	if nodeInfo, found := nodeInfoCache[id]; found {
-		//		if nodeInfoCopy, err := deepCopyNodeInfo(nodeInfo); err == nil {
-		//			result[id] = nodeInfoCopy
-		//			continue
-		//		}
-		//	}
-		//}
+		if nodeInfoCache != nil {
+			if nodeInfo, found := nodeInfoCache[id]; found {
+				if nodeInfoCopy, err := deepCopyNodeInfo(nodeInfo); err == nil {
+					result[id] = nodeInfoCopy
+					continue
+				}
+			}
+		}
 
 		// No good template, trying to generate one. This is called only if there are no
 		// working nodes in the node groups. By default CA tries to use a real-world example.
@@ -321,6 +321,12 @@ func getNodeInfosForGroups(nodes []*apiv1.Node, nodeInfoCache map[string]*schedu
 			}
 		}
 		result[id] = nodeInfo
+		if nodeInfoCache == nil {
+			continue
+		}
+		if nodeInfoCopy, err := deepCopyNodeInfo(nodeInfo); err == nil {
+			nodeInfoCache[id] = nodeInfoCopy
+		}
 	}
 
 	// Remove invalid node groups from cache
@@ -331,23 +337,23 @@ func getNodeInfosForGroups(nodes []*apiv1.Node, nodeInfoCache map[string]*schedu
 	}
 
 	// Last resort - unready/unschedulable nodes.
-	for _, node := range nodes {
-		// Allowing broken nodes
-		if !kube_util.IsNodeReadyAndSchedulable(node) {
-			added, _, typedErr := processNode(node)
-			if typedErr != nil {
-				return map[string]*schedulernodeinfo.NodeInfo{}, typedErr
-			}
-			nodeGroup, err := cloudProvider.NodeGroupForNode(node)
-			if err != nil {
-				return map[string]*schedulernodeinfo.NodeInfo{}, errors.ToAutoscalerError(
-					errors.CloudProviderError, err)
-			}
-			if added {
-				klog.Warningf("Built template for %s based on unready/unschedulable node %s", nodeGroup.Id(), node.Name)
-			}
-		}
-	}
+	//for _, node := range nodes {
+	//	// Allowing broken nodes
+	//	if !kube_util.IsNodeReadyAndSchedulable(node) {
+	//		added, _, typedErr := processNode(node)
+	//		if typedErr != nil {
+	//			return map[string]*schedulernodeinfo.NodeInfo{}, typedErr
+	//		}
+	//		nodeGroup, err := cloudProvider.NodeGroupForNode(node)
+	//		if err != nil {
+	//			return map[string]*schedulernodeinfo.NodeInfo{}, errors.ToAutoscalerError(
+	//				errors.CloudProviderError, err)
+	//		}
+	//		if added {
+	//			klog.Warningf("Built template for %s based on unready/unschedulable node %s", nodeGroup.Id(), node.Name)
+	//		}
+	//	}
+	//}
 
 	return result, nil
 }
