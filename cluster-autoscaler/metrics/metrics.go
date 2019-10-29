@@ -17,7 +17,7 @@ limitations under the License.
 package metrics
 
 import (
-	"strconv"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
@@ -209,10 +209,10 @@ var (
 		prometheus.SummaryOpts{
 			Namespace: caNamespace,
 			Name:      "cloud_provider_query_seconds",
-			Help:      "Quantiles of time taken by cloud provider query by method and success in seconds",
+			Help:      "Quantiles of time taken by cloud provider query for each method by success in seconds",
 			MaxAge:    time.Hour,
 		},
-		[]string{"cloud", "method", "success"},
+		[]string{"cloud", "method", "success", "reason"},
 	)
 
 	evictionsCount = prometheus.NewCounter(
@@ -407,6 +407,16 @@ func UpdateScaleDownInCooldown(inCooldown bool) {
 	}
 }
 
-func ObserveCloudProviderQuery(cloud, method string, success bool, start time.Time) {
-	cloudProviderQuery.WithLabelValues(cloud, method, strconv.FormatBool(success)).Observe(time.Now().Sub(start).Seconds())
+func ObserveCloudProviderQuery(cloud, method string, err error, start time.Time) {
+	latency := time.Now().Sub(start).Seconds()
+	if err == nil {
+		cloudProviderQuery.WithLabelValues(cloud, method, "true", "ok").Observe(latency)
+		return
+	}
+	result := "error"
+	awsErr, ok := err.(awserr.Error)
+	if ok {
+		result = awsErr.Code()
+	}
+	cloudProviderQuery.WithLabelValues(cloud, method, "false", result).Observe(latency)
 }

@@ -78,7 +78,7 @@ func (m autoScalingWrapper) populateLaunchConfigurationInstanceTypeCache(autosca
 			}
 			start := time.Now()
 			r, err := m.DescribeLaunchConfigurations(params)
-			metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchConfigurations", err == nil, start)
+			metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchConfigurations", err, start)
 			if err == nil {
 				for _, lc := range r.LaunchConfigurations {
 					launchToInstanceType[*lc.LaunchConfigurationName] = *lc.InstanceType
@@ -114,7 +114,7 @@ func (m autoScalingWrapper) getInstanceTypeByLCName(name string) (string, error)
 	}
 	start := time.Now()
 	launchConfigurations, err := m.DescribeLaunchConfigurations(params)
-	metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchConfigurations", err == nil, start)
+	metrics.ObserveCloudProviderQuery("aws", "DescribeLaunchConfigurations", err, start)
 	if err != nil {
 		klog.V(4).Infof("Failed LaunchConfiguration info request for %s: %v", name, err)
 		return "", err
@@ -155,7 +155,7 @@ func (m *autoScalingWrapper) getAutoscalingGroupsByNames(names []string) ([]*aut
 				// results, if any.
 				return true
 			})
-			metrics.ObserveCloudProviderQuery("aws", "DescribeAutoScalingGroupsPages", err == nil, start)
+			metrics.ObserveCloudProviderQuery("aws", "DescribeAutoScalingGroupsPages", err, start)
 			if err == nil {
 				break
 			}
@@ -202,7 +202,7 @@ func (m *autoScalingWrapper) getAutoscalingGroupNamesByTags(kvs map[string]strin
 		// results, if any.
 		return true
 	})
-	metrics.ObserveCloudProviderQuery("aws", "DescribeTagsPages", err == nil, start)
+	metrics.ObserveCloudProviderQuery("aws", "DescribeTagsPages", err, start)
 	if err != nil {
 		return nil, err
 	}
