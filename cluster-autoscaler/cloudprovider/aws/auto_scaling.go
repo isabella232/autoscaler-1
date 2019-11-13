@@ -51,6 +51,12 @@ func (m autoScalingWrapper) populateLaunchConfigurationInstanceTypeCache(autosca
 	var launchConfigToQuery []*string
 
 	for _, asg := range autoscalingGroups {
+		if asg == nil {
+			continue
+		}
+		if asg.LaunchConfigurationName == nil {
+			continue
+		}
 		i, ok := m.launchConfigurationInstanceTypeCache[*asg.LaunchConfigurationName]
 		if ok {
 			launchToInstanceType[*asg.LaunchConfigurationName] = i
