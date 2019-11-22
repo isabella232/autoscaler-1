@@ -49,6 +49,7 @@ type productAttributes struct {
 	VCPU         string `json:"vcpu"`
 	Memory       string `json:"memory"`
 	GPU          string `json:"gpu"`
+	Storage      string `json:"storage"`
 }
 
 // GenerateEC2InstanceTypes returns a map of ec2 resources
@@ -101,6 +102,9 @@ func GenerateEC2InstanceTypes(region string) (map[string]*InstanceType, error) {
 					}
 					if attr.GPU != "" {
 						instanceTypes[attr.InstanceType].GPU = parseCPU(attr.GPU)
+					}
+					if attr.Storage != "" && attr.Storage != "EBS only" && attr.Storage != "NA" {
+						instanceTypes[attr.InstanceType].Storage = 1
 					}
 				}
 			}
