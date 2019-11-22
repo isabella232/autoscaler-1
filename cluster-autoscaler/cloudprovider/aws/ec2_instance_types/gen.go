@@ -1,5 +1,3 @@
-// +build ignore
-
 /*
 Copyright 2017 The Kubernetes Authors.
 
@@ -46,6 +44,7 @@ type productAttributes struct {
 	VCPU         string `json:"vcpu"`
 	Memory       string `json:"memory"`
 	GPU          string `json:"gpu"`
+	Storage      string `json:"storage"`
 }
 
 type instanceType struct {
@@ -53,6 +52,7 @@ type instanceType struct {
 	VCPU         int64
 	Memory       int64
 	GPU          int64
+	Storage      int64
 }
 
 var packageTemplate = template.Must(template.New("").Parse(`/*
@@ -80,6 +80,7 @@ type instanceType struct {
 	VCPU         int64
 	MemoryMb     int64
 	GPU          int64
+	Storage      int64
 }
 
 // InstanceTypes is a map of ec2 resources
@@ -90,6 +91,7 @@ var InstanceTypes = map[string]*instanceType{
 		VCPU:         {{ .VCPU }},
 		MemoryMb:     {{ .Memory }},
 		GPU:          {{ .GPU }},
+		Storage:      {{ .Storage }},
 	},
 {{- end }}
 }
@@ -143,6 +145,9 @@ func main() {
 					}
 					if attr.GPU != "" {
 						instanceTypes[attr.InstanceType].GPU = parseCPU(attr.GPU)
+					}
+					if attr.Storage != "" && attr.Storage != "EBS only" && attr.Storage != "NA" {
+						instanceTypes[attr.InstanceType].Storage = 1
 					}
 				}
 			}

@@ -18,6 +18,7 @@ package simulator
 
 import (
 	"fmt"
+	v1 "k8s.io/client-go/listers/core/v1"
 	"strings"
 	"sync"
 
@@ -63,6 +64,7 @@ type PredicateChecker struct {
 	predicates                []PredicateInfo
 	predicateMetadataProducer predicates.PredicateMetadataProducer
 	enableAffinityPredicate   bool
+	PersistentVolumeClaimLister v1.PersistentVolumeClaimLister
 }
 
 // We run some predicates first as they are cheap to check and they should be enough
@@ -192,6 +194,7 @@ func NewPredicateChecker(kubeClient kube_client.Interface, stop <-chan struct{})
 
 	informerFactory.Start(stop)
 
+
 	metadataProducer, err := configurator.GetPredicateMetadataProducer()
 	if err != nil {
 		return nil, fmt.Errorf("could not obtain predicateMetadataProducer; %v", err.Error())
@@ -201,6 +204,7 @@ func NewPredicateChecker(kubeClient kube_client.Interface, stop <-chan struct{})
 		predicates:                predicateList,
 		predicateMetadataProducer: metadataProducer,
 		enableAffinityPredicate:   true,
+		PersistentVolumeClaimLister: pvcInformer.Lister(),
 	}, nil
 }
 
