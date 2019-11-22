@@ -1,5 +1,3 @@
-// +build ignore
-
 /*
 Copyright 2017 The Kubernetes Authors.
 
@@ -51,6 +49,7 @@ type InstanceType struct {
 	VCPU         int64
 	MemoryMb     int64
 	GPU          int64
+	Storage      int64
 }
 
 // InstanceTypes is a map of ec2 resources
@@ -61,6 +60,7 @@ var InstanceTypes = map[string]*InstanceType{
 		VCPU:         {{ .VCPU }},
 		MemoryMb:     {{ .MemoryMb }},
 		GPU:          {{ .GPU }},
+		Storage:      {{ .Storage }},
 	},
 {{- end }}
 }
