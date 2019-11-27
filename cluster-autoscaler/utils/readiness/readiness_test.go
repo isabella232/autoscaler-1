@@ -1,4 +1,4 @@
-package taints
+package readiness
 
 import (
 	"fmt"
@@ -175,7 +175,7 @@ func TestFilterOutNodesWithTaints(t *testing.T) {
 		nodeHasNidhoggTaintNotReady,
 	}
 
-	newAllNodes, newReadyNodes := FilterOutNodesWithTaints(initialAllNodes, initialReadyNodes)
+	newAllNodes, newReadyNodes := FilterOutNodesWithLabels(initialAllNodes, initialReadyNodes)
 
 	foundInReady := make(map[string]bool)
 	for _, node := range newReadyNodes {
