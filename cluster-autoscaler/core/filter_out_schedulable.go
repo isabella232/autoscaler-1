@@ -20,6 +20,7 @@ import (
 	"sort"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/autoscaler/cluster-autoscaler/context"
 	"k8s.io/autoscaler/cluster-autoscaler/core/utils"
@@ -71,6 +72,29 @@ func (p *filterOutSchedulablePodListProcessor) Process(
 
 	if err != nil {
 		return nil, err
+	}
+
+	pvcLister := context.ListerRegistry.PersistentVolumeClaimLister()
+	for _, po := range unschedulablePods {
+		var volumes []apiv1.Volume
+		for _, vol := range po.Spec.Volumes {
+			if vol.PersistentVolumeClaim == nil {
+				volumes = append(volumes, vol)
+				continue
+			}
+			pvc, err := pvcLister.PersistentVolumeClaims(po.Namespace).Get(vol.PersistentVolumeClaim.ClaimName)
+			if err != nil {
+				volumes = append(volumes, vol)
+				continue
+			}
+			if *pvc.Spec.StorageClassName != "local-data" {
+				volumes = append(volumes, vol)
+				continue
+			}
+			po.Spec.Containers[0].Resources.Requests["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
+			po.Spec.Containers[0].Resources.Limits["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
+		}
+		po.Spec.Volumes = volumes
 	}
 
 	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
