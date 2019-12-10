@@ -22,7 +22,6 @@ import (
 	"time"
 
 	apiv1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	schedulerframework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
@@ -368,30 +367,6 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 	metrics.UpdateUnschedulablePodsCount(len(unschedulablePods))
 
 	unschedulablePods = tpu.ClearTPURequests(unschedulablePods)
-
-	pvcLister := autoscalingContext.ListerRegistry.PersistentVolumeClaimLister()
-	for _, po := range unschedulablePods {
-		var volumes []apiv1.Volume
-		for _, vol := range po.Spec.Volumes {
-			if vol.PersistentVolumeClaim == nil {
-				volumes = append(volumes, vol)
-				continue
-			}
-
-			pvc, err := pvcLister.PersistentVolumeClaims(po.Namespace).Get(vol.PersistentVolumeClaim.ClaimName)
-			if err != nil {
-				volumes = append(volumes, vol)
-				continue
-			}
-			if *pvc.Spec.StorageClassName != "local-data" {
-				volumes = append(volumes, vol)
-				continue
-			}
-			po.Spec.Containers[0].Resources.Requests["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
-			po.Spec.Containers[0].Resources.Limits["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
-		}
-		po.Spec.Volumes = volumes
-	}
 
 	// todo: move split and append below to separate PodListProcessor
 	// Some unschedulable pods can be waiting for lower priority pods preemption so they have nominated node to run.
