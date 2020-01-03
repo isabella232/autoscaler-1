@@ -91,6 +91,14 @@ func (filterOutSchedulablePodListProcessor) Process(
 				volumes = append(volumes, vol)
 				continue
 			}
+
+			if len(po.Spec.Containers[0].Resources.Requests) == 0 {
+				po.Spec.Containers[0].Resources.Requests = apiv1.ResourceList{}
+			}
+			if len(po.Spec.Containers[0].Resources.Limits) == 0 {
+				po.Spec.Containers[0].Resources.Limits = apiv1.ResourceList{}
+			}
+
 			po.Spec.Containers[0].Resources.Requests["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
 			po.Spec.Containers[0].Resources.Limits["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
 		}
