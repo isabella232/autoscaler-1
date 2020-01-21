@@ -20,9 +20,25 @@ import (
 	"time"
 
 	apiv1 "k8s.io/api/core/v1"
-	"k8s.io/autoscaler/cluster-autoscaler/utils"
 	"k8s.io/klog"
 )
+
+func getUnreadyNodeCopy(node *apiv1.Node) *apiv1.Node {
+	newNode := node.DeepCopy()
+	newReadyCondition := apiv1.NodeCondition{
+		Type:               apiv1.NodeReady,
+		Status:             apiv1.ConditionFalse,
+		LastTransitionTime: node.CreationTimestamp,
+	}
+	newNodeConditions := []apiv1.NodeCondition{newReadyCondition}
+	for _, condition := range newNode.Status.Conditions {
+		if condition.Type != apiv1.NodeReady {
+			newNodeConditions = append(newNodeConditions, condition)
+		}
+	}
+	newNode.Status.Conditions = newNodeConditions
+	return newNode
+}
 
 func isReady(po *apiv1.Pod) bool {
 	for _, condition := range po.Status.Conditions {
@@ -58,7 +74,7 @@ func FilterOutNodesWithUnreadyLocalVolume(pods []*apiv1.Pod, allNodes, readyNode
 			newReadyNodes = append(newReadyNodes, node)
 		} else {
 			klog.V(0).Infof("Overriding status of node %v, which seems to have unready local volume", node.Name)
-			nodesWithUnreadyVolumes[node.Name] = utils.GetUnreadyNodeCopy(node)
+			nodesWithUnreadyVolumes[node.Name] = getUnreadyNodeCopy(node)
 		}
 	}
 	// Override any node with unready volume with its "unready" copy
