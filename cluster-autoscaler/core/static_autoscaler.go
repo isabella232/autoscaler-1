@@ -19,6 +19,7 @@ package core
 import (
 	"fmt"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/autoscaler/cluster-autoscaler/utils/taints"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/volume"
 	"time"
 
@@ -40,7 +41,6 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/utils/backoff"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/deletetaint"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
-	"k8s.io/autoscaler/cluster-autoscaler/utils/taints"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/tpu"
 	"k8s.io/klog"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
@@ -637,7 +637,7 @@ func (a *StaticAutoscaler) obtainNodeLists(cp cloudprovider.CloudProvider) ([]*a
 		klog.Errorf("Failed to list scheduled pods: %v", err)
 		return nil, nil, errors.ToAutoscalerError(errors.ApiCallError, err)
 	}
-	allNodes, readyNodes = taints.FilterOutNodesWithTaints(allNodes, readyNodes)
+	allNodes, readyNodes = taints.FilterOutNodesWithIgnoredTaints(a.ignoredTaints, allNodes, readyNodes)
 	allNodes, readyNodes = volume.FilterOutNodesWithUnreadyLocalVolume(pods, allNodes, readyNodes)
 	return allNodes, readyNodes, nil
 }
