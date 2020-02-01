@@ -20,6 +20,7 @@ import (
 	"sort"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/autoscaler/cluster-autoscaler/context"
 	"k8s.io/autoscaler/cluster-autoscaler/estimator"
 	"k8s.io/autoscaler/cluster-autoscaler/metrics"
@@ -66,19 +67,48 @@ func (filterOutSchedulablePodListProcessor) Process(
 	filterOutSchedulableStart := time.Now()
 	var unschedulablePodsToHelp []*apiv1.Pod
 
-	if context.EstimatorName == estimator.BinpackingEstimatorName {
-		unschedulablePodsToHelp = filterOutSchedulableByPacking(unschedulablePods, upcomingNodes, allScheduledPods,
-			context.PredicateChecker, context.ExpendablePodsPriorityCutoff, false)
-	} else {
-		unschedulablePodsToHelp = unschedulablePods
-	}
-
 	if context.FilterOutSchedulablePodsUsesPacking {
 		unschedulablePodsToHelp = filterOutSchedulableByPacking(unschedulablePodsToHelp, readyNodes, allScheduledPods,
 			context.PredicateChecker, context.ExpendablePodsPriorityCutoff, true)
 	} else {
 		unschedulablePodsToHelp = filterOutSchedulableSimple(unschedulablePodsToHelp, readyNodes, allScheduledPods,
 			context.PredicateChecker, context.ExpendablePodsPriorityCutoff)
+	}
+
+	for _, po := range unschedulablePods {
+		var volumes []apiv1.Volume
+		for _, vol := range po.Spec.Volumes {
+			if vol.PersistentVolumeClaim == nil {
+				volumes = append(volumes, vol)
+				continue
+			}
+			pvc, err := context.PredicateChecker.PersistentVolumeClaimLister.PersistentVolumeClaims(po.Namespace).Get(vol.PersistentVolumeClaim.ClaimName)
+			if err != nil {
+				volumes = append(volumes, vol)
+				continue
+			}
+			if *pvc.Spec.StorageClassName != "local-data" {
+				volumes = append(volumes, vol)
+				continue
+			}
+
+			if len(po.Spec.Containers[0].Resources.Requests) == 0 {
+				po.Spec.Containers[0].Resources.Requests = apiv1.ResourceList{}
+			}
+			if len(po.Spec.Containers[0].Resources.Limits) == 0 {
+				po.Spec.Containers[0].Resources.Limits = apiv1.ResourceList{}
+			}
+
+			po.Spec.Containers[0].Resources.Requests["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
+			po.Spec.Containers[0].Resources.Limits["storageClass/local-data"] = *resource.NewQuantity(1, resource.DecimalSI)
+		}
+		po.Spec.Volumes = volumes
+	}
+	if context.EstimatorName == estimator.BinpackingEstimatorName {
+		unschedulablePodsToHelp = filterOutSchedulableByPacking(unschedulablePods, upcomingNodes, allScheduledPods,
+			context.PredicateChecker, context.ExpendablePodsPriorityCutoff, false)
+	} else {
+		unschedulablePodsToHelp = unschedulablePods
 	}
 
 	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
