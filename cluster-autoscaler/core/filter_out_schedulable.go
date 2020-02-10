@@ -115,7 +115,28 @@ func (filterOutSchedulablePodListProcessor) Process(
 
 	if len(unschedulablePodsToHelp) != len(unschedulablePods) {
 		klog.V(2).Info("Schedulable pods present")
-		context.ProcessorCallbacks.DisableScaleDownForLoop()
+
+		toIndexPods, toCheckPods := unschedulablePods, unschedulablePodsToHelp
+		if len(unschedulablePodsToHelp) < len(unschedulablePods) {
+			toCheckPods, toIndexPods = unschedulablePods, unschedulablePodsToHelp
+		}
+
+		unschedulablePodsMap := make(map[string]struct{}, len(toIndexPods))
+		for _, po := range toIndexPods {
+			unschedulablePodsMap[po.Namespace+"/"+po.Name] = struct{}{}
+		}
+		for _, po := range toCheckPods {
+			podKey := po.Namespace + "/" + po.Name
+			if _, ok := unschedulablePodsMap[podKey]; ok {
+				continue
+			}
+			klog.V(2).Infof("Schedulable pod present: %s", podKey)
+			if time.Now().Add(time.Hour).After(po.CreationTimestamp.Time) {
+				continue
+			}
+			klog.V(2).Infof("Recent schedulable pod present, DisableScaleDownForLoop: %s", podKey)
+			context.ProcessorCallbacks.DisableScaleDownForLoop()
+		}
 	} else {
 		klog.V(4).Info("No schedulable pods")
 	}
