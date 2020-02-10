@@ -130,8 +130,8 @@ func (filterOutSchedulablePodListProcessor) Process(
 			if _, ok := unschedulablePodsMap[podKey]; ok {
 				continue
 			}
-			klog.V(2).Infof("Schedulable pod present: %s", podKey)
 			if time.Now().Add(time.Hour).After(po.CreationTimestamp.Time) {
+				klog.V(2).Infof("Old schedulable pod present: %s", podKey)
 				continue
 			}
 			klog.V(2).Infof("Recent schedulable pod present, DisableScaleDownForLoop: %s", podKey)
