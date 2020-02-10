@@ -111,11 +111,11 @@ func (filterOutSchedulablePodListProcessor) Process(
 		unschedulablePodsToHelp = unschedulablePods
 	}
 
-	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
-
 	if len(unschedulablePodsToHelp) != len(unschedulablePods) {
 		klog.V(2).Info("Schedulable pods present")
 
+		// index pods and check the difference between these 2 lists,
+		// DisableScaleDownForLoop when the pod is newer than 1h. This to avoid an unlimited scale down forbidden
 		toIndexPods, toCheckPods := unschedulablePods, unschedulablePodsToHelp
 		if len(unschedulablePodsToHelp) < len(unschedulablePods) {
 			toCheckPods, toIndexPods = unschedulablePods, unschedulablePodsToHelp
@@ -140,6 +140,8 @@ func (filterOutSchedulablePodListProcessor) Process(
 	} else {
 		klog.V(4).Info("No schedulable pods")
 	}
+
+	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
 	return unschedulablePodsToHelp, allScheduledPods, nil
 }
 
