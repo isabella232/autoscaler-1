@@ -111,14 +111,37 @@ func (filterOutSchedulablePodListProcessor) Process(
 		unschedulablePodsToHelp = unschedulablePods
 	}
 
-	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
-
 	if len(unschedulablePodsToHelp) != len(unschedulablePods) {
 		klog.V(2).Info("Schedulable pods present")
-		context.ProcessorCallbacks.DisableScaleDownForLoop()
+
+		// index pods and check the difference between these 2 lists,
+		// DisableScaleDownForLoop when the pod is newer than 1h. This to avoid an unlimited scale down forbidden
+		toIndexPods, toCheckPods := unschedulablePods, unschedulablePodsToHelp
+		if len(unschedulablePodsToHelp) < len(unschedulablePods) {
+			toCheckPods, toIndexPods = unschedulablePods, unschedulablePodsToHelp
+		}
+
+		unschedulablePodsMap := make(map[string]struct{}, len(toIndexPods))
+		for _, po := range toIndexPods {
+			unschedulablePodsMap[po.Namespace+"/"+po.Name] = struct{}{}
+		}
+		for _, po := range toCheckPods {
+			podKey := po.Namespace + "/" + po.Name
+			if _, ok := unschedulablePodsMap[podKey]; ok {
+				continue
+			}
+			if time.Since(po.CreationTimestamp.Time) > time.Hour {
+				klog.V(2).Infof("Old schedulable pod present: %s", podKey)
+				continue
+			}
+			klog.V(2).Infof("Recent schedulable pod present, DisableScaleDownForLoop: %s", podKey)
+			context.ProcessorCallbacks.DisableScaleDownForLoop()
+		}
 	} else {
 		klog.V(4).Info("No schedulable pods")
 	}
+
+	metrics.UpdateDurationFromStart(metrics.FilterOutSchedulable, filterOutSchedulableStart)
 	return unschedulablePodsToHelp, allScheduledPods, nil
 }
 
