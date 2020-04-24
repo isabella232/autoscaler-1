@@ -17,15 +17,16 @@ limitations under the License.
 package azure
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Azure/go-autorest/autorest/azure"
-	"gopkg.in/gcfg.v1"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/config/dynamic"
 	"k8s.io/klog"
@@ -43,7 +44,24 @@ const (
 
 	// The path of deployment parameters for standard vm.
 	deploymentParametersPath = "/var/lib/azure/azuredeploy.parameters.json"
+
+	vmssTagMin                     = "min"
+	vmssTagMax                     = "max"
+	autoDiscovererTypeLabel        = "label"
+	labelAutoDiscovererKeyMinNodes = "min"
+	labelAutoDiscovererKeyMaxNodes = "max"
 )
+
+var validLabelAutoDiscovererKeys = strings.Join([]string{
+	labelAutoDiscovererKeyMinNodes,
+	labelAutoDiscovererKeyMaxNodes,
+}, ", ")
+
+// A labelAutoDiscoveryConfig specifies how to autodiscover Azure scale sets.
+type labelAutoDiscoveryConfig struct {
+	// Key-values to match on.
+	Selector map[string]string
+}
 
 // AzureManager handles Azure communication and data caching.
 type AzureManager struct {
@@ -53,7 +71,7 @@ type AzureManager struct {
 
 	asgCache              *asgCache
 	lastRefresh           time.Time
-	asgAutoDiscoverySpecs []cloudprovider.LabelAutoDiscoveryConfig
+	asgAutoDiscoverySpecs []labelAutoDiscoveryConfig
 	explicitlyConfigured  map[string]bool
 }
 
@@ -79,6 +97,9 @@ type Config struct {
 	ClusterName string `json:"clusterName" yaml:"clusterName"`
 	//Config only for AKS
 	NodeResourceGroup string `json:"nodeResourceGroup" yaml:"nodeResourceGroup"`
+
+	// ASG cache TTL in seconds
+	AsgCacheTTL int64 `json:"asgCacheTTL" yaml:"asgCacheTTL"`
 }
 
 // TrimSpace removes all leading and trailing white spaces.
@@ -100,12 +121,16 @@ func (c *Config) TrimSpace() {
 // CreateAzureManager creates Azure Manager object to work with Azure.
 func CreateAzureManager(configReader io.Reader, discoveryOpts cloudprovider.NodeGroupDiscoveryOptions) (*AzureManager, error) {
 	var err error
-	var cfg Config
+	cfg := &Config{}
 
 	if configReader != nil {
-		if err := gcfg.ReadInto(&cfg, configReader); err != nil {
-			klog.Errorf("Couldn't read config: %v", err)
-			return nil, err
+		body, err := ioutil.ReadAll(configReader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read config: %v", err)
+		}
+		err = json.Unmarshal(body, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal config body: %v", err)
 		}
 	} else {
 		cfg.Cloud = os.Getenv("ARM_CLOUD")
@@ -128,6 +153,13 @@ func CreateAzureManager(configReader io.Reader, discoveryOpts cloudprovider.Node
 				return nil, err
 			}
 		}
+
+		if asgCacheTTL := os.Getenv("AZURE_ASG_CACHE_TTL"); asgCacheTTL != "" {
+			cfg.AsgCacheTTL, err = strconv.ParseInt(asgCacheTTL, 10, 0)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse AZURE_ASG_CACHE_TTL %q: %v", asgCacheTTL, err)
+			}
+		}
 	}
 	cfg.TrimSpace()
 
@@ -147,6 +179,10 @@ func CreateAzureManager(configReader io.Reader, discoveryOpts cloudprovider.Node
 		cfg.DeploymentParameters = parameters
 	}
 
+	if cfg.AsgCacheTTL == 0 {
+		cfg.AsgCacheTTL = int64(defaultAsgCacheTTL)
+	}
+
 	// Defaulting env to Azure Public Cloud.
 	env := azure.PublicCloud
 	if cfg.Cloud != "" {
@@ -156,32 +192,32 @@ func CreateAzureManager(configReader io.Reader, discoveryOpts cloudprovider.Node
 		}
 	}
 
-	if err := validateConfig(&cfg); err != nil {
+	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
 
 	klog.Infof("Starting azure manager with subscription ID %q", cfg.SubscriptionID)
 
-	azClient, err := newAzClient(&cfg, &env)
+	azClient, err := newAzClient(cfg, &env)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create azure manager.
 	manager := &AzureManager{
-		config:               &cfg,
+		config:               cfg,
 		env:                  env,
 		azClient:             azClient,
 		explicitlyConfigured: make(map[string]bool),
 	}
 
-	cache, err := newAsgCache()
+	cache, err := newAsgCache(cfg.AsgCacheTTL)
 	if err != nil {
 		return nil, err
 	}
 	manager.asgCache = cache
 
-	specs, err := discoveryOpts.ParseLabelAutoDiscoverySpecs()
+	specs, err := parseLabelAutoDiscoverySpecs(discoveryOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -253,8 +289,13 @@ func (m *AzureManager) Refresh() error {
 }
 
 func (m *AzureManager) forceRefresh() error {
+	// TODO: Refactor some of this logic out of forceRefresh and
+	// consider merging the list call with the Nodes() call
 	if err := m.fetchAutoAsgs(); err != nil {
 		klog.Errorf("Failed to fetch ASGs: %v", err)
+	}
+	if err := m.regenerateCache(); err != nil {
+		klog.Errorf("Failed to regenerate ASG cache: %v", err)
 		return err
 	}
 	m.lastRefresh = time.Now()
@@ -335,7 +376,7 @@ func (m *AzureManager) Cleanup() {
 	m.asgCache.Cleanup()
 }
 
-func (m *AzureManager) getFilteredAutoscalingGroups(filter []cloudprovider.LabelAutoDiscoveryConfig) (asgs []cloudprovider.NodeGroup, err error) {
+func (m *AzureManager) getFilteredAutoscalingGroups(filter []labelAutoDiscoveryConfig) (asgs []cloudprovider.NodeGroup, err error) {
 	if len(filter) == 0 {
 		return nil, nil
 	}
@@ -359,7 +400,7 @@ func (m *AzureManager) getFilteredAutoscalingGroups(filter []cloudprovider.Label
 }
 
 // listScaleSets gets a list of scale sets and instanceIDs.
-func (m *AzureManager) listScaleSets(filter []cloudprovider.LabelAutoDiscoveryConfig) (asgs []cloudprovider.NodeGroup, err error) {
+func (m *AzureManager) listScaleSets(filter []labelAutoDiscoveryConfig) (asgs []cloudprovider.NodeGroup, err error) {
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
@@ -379,13 +420,41 @@ func (m *AzureManager) listScaleSets(filter []cloudprovider.LabelAutoDiscoveryCo
 				continue
 			}
 		}
-
 		spec := &dynamic.NodeGroupSpec{
 			Name:               *scaleSet.Name,
 			MinSize:            1,
 			MaxSize:            -1,
 			SupportScaleToZero: scaleToZeroSupportedVMSS,
 		}
+
+		if val, ok := scaleSet.Tags["min"]; ok {
+			if minSize, err := strconv.Atoi(*val); err == nil {
+				spec.MinSize = minSize
+			} else {
+				return asgs, fmt.Errorf("invalid minimum size specified for vmss: %s", err)
+			}
+		} else {
+			return asgs, fmt.Errorf("no minimum size specified for vmss: %s", *scaleSet.Name)
+		}
+		if spec.MinSize < 0 {
+			return asgs, fmt.Errorf("minimum size must be a non-negative number of nodes")
+		}
+		if val, ok := scaleSet.Tags["max"]; ok {
+			if maxSize, err := strconv.Atoi(*val); err == nil {
+				spec.MaxSize = maxSize
+			} else {
+				return asgs, fmt.Errorf("invalid maximum size specified for vmss: %s", err)
+			}
+		} else {
+			return asgs, fmt.Errorf("no maximum size specified for vmss: %s", *scaleSet.Name)
+		}
+		if spec.MaxSize < 1 {
+			return asgs, fmt.Errorf("maximum size must be greater than 1 node")
+		}
+		if spec.MaxSize < spec.MinSize {
+			return asgs, fmt.Errorf("maximum size must be greater than minimum size")
+		}
+
 		asg, _ := NewScaleSet(spec, m)
 		asgs = append(asgs, asg)
 	}
@@ -395,7 +464,7 @@ func (m *AzureManager) listScaleSets(filter []cloudprovider.LabelAutoDiscoveryCo
 
 // listAgentPools gets a list of agent pools and instanceIDs.
 // Note: filter won't take effect for agent pools.
-func (m *AzureManager) listAgentPools(filter []cloudprovider.LabelAutoDiscoveryConfig) (asgs []cloudprovider.NodeGroup, err error) {
+func (m *AzureManager) listAgentPools(filter []labelAutoDiscoveryConfig) (asgs []cloudprovider.NodeGroup, err error) {
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 	deploy, err := m.azClient.deploymentsClient.Get(ctx, m.config.ResourceGroup, m.config.Deployment)
@@ -422,4 +491,47 @@ func (m *AzureManager) listAgentPools(filter []cloudprovider.LabelAutoDiscoveryC
 	}
 
 	return asgs, nil
+}
+
+// ParseLabelAutoDiscoverySpecs returns any provided NodeGroupAutoDiscoverySpecs
+// parsed into configuration appropriate for ASG autodiscovery.
+func parseLabelAutoDiscoverySpecs(o cloudprovider.NodeGroupDiscoveryOptions) ([]labelAutoDiscoveryConfig, error) {
+	cfgs := make([]labelAutoDiscoveryConfig, len(o.NodeGroupAutoDiscoverySpecs))
+	var err error
+	for i, spec := range o.NodeGroupAutoDiscoverySpecs {
+		cfgs[i], err = parseLabelAutoDiscoverySpec(spec)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return cfgs, nil
+}
+
+// parseLabelAutoDiscoverySpec parses a single spec and returns the corredponding node group spec.
+func parseLabelAutoDiscoverySpec(spec string) (labelAutoDiscoveryConfig, error) {
+	cfg := labelAutoDiscoveryConfig{
+		Selector: make(map[string]string),
+	}
+
+	tokens := strings.Split(spec, ":")
+	if len(tokens) != 2 {
+		return cfg, fmt.Errorf("spec \"%s\" should be discoverer:key=value,key=value", spec)
+	}
+	discoverer := tokens[0]
+	if discoverer != autoDiscovererTypeLabel {
+		return cfg, fmt.Errorf("unsupported discoverer specified: %s", discoverer)
+	}
+
+	for _, arg := range strings.Split(tokens[1], ",") {
+		kv := strings.Split(arg, "=")
+		if len(kv) != 2 {
+			return cfg, fmt.Errorf("invalid key=value pair %s", kv)
+		}
+		k, v := kv[0], kv[1]
+		if k == "" || v == "" {
+			return cfg, fmt.Errorf("empty value not allowed in key=value tag pairs")
+		}
+		cfg.Selector[k] = v
+	}
+	return cfg, nil
 }

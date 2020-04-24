@@ -29,6 +29,8 @@ import (
 )
 
 func newTestAzureManager(t *testing.T) *AzureManager {
+	vmssName := "test-asg"
+	var vmssCapacity int64 = 3
 	manager := &AzureManager{
 		env:                  azure.PublicCloud,
 		explicitlyConfigured: make(map[string]bool),
@@ -48,12 +50,22 @@ func newTestAzureManager(t *testing.T) *AzureManager {
 				FakeStore: make(map[string]map[string]compute.VirtualMachine),
 			},
 			virtualMachineScaleSetsClient: &VirtualMachineScaleSetsClientMock{
-				FakeStore: make(map[string]map[string]compute.VirtualMachineScaleSet),
+				FakeStore: map[string]map[string]compute.VirtualMachineScaleSet{
+					"test": map[string]compute.VirtualMachineScaleSet{
+						"test-asg": compute.VirtualMachineScaleSet{
+							Name: &vmssName,
+							Sku: &compute.Sku{
+								Capacity: &vmssCapacity,
+							},
+						},
+					},
+				},
 			},
 			virtualMachineScaleSetVMsClient: &VirtualMachineScaleSetVMsClientMock{},
 		},
 	}
-	cache, error := newAsgCache()
+
+	cache, error := newAsgCache(int64(defaultAsgCacheTTL))
 	assert.NoError(t, error)
 
 	manager.asgCache = cache
@@ -108,6 +120,8 @@ func TestNodeGroupForNode(t *testing.T) {
 			ProviderID: "azure://" + fakeVirtualMachineScaleSetVMID,
 		},
 	}
+	// refresh cache
+	provider.azureManager.regenerateCache()
 	group, err := provider.NodeGroupForNode(node)
 	assert.NoError(t, err)
 	assert.NotNil(t, group, "Group should not be nil")
