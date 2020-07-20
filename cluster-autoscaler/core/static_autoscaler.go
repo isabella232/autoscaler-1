@@ -375,6 +375,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) errors.AutoscalerError
 			a.lastScaleUpTime = currentTime
 			// No scale down in this iteration.
 			scaleDownStatus.Result = status.ScaleDownInCooldown
+			a.processorCallbacks.DisableScaleDownForLoop()
 			return nil
 		}
 	}
