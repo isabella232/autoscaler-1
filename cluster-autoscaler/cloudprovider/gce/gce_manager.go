@@ -17,6 +17,7 @@ limitations under the License.
 package gce
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
@@ -32,6 +34,7 @@ import (
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/workqueue"
 	provider_gce "k8s.io/legacy-cloud-providers/gce"
 
 	"cloud.google.com/go/compute/metadata"
@@ -360,15 +363,26 @@ func (m *gceManagerImpl) buildMigFromSpec(s *dynamic.NodeGroupSpec) (Mig, error)
 func (m *gceManagerImpl) fetchAutoMigs() error {
 	exists := make(map[GceRef]bool)
 	changed := false
-	for _, cfg := range m.migAutoDiscoverySpecs {
+
+	var errs []error
+	mu := sync.Mutex{}
+	ctx, cancel := context.WithCancel(context.Background())
+	workqueue.ParallelizeUntil(ctx, 10, len(m.migAutoDiscoverySpecs), func(piece int) {
+		cfg := m.migAutoDiscoverySpecs[piece]
 		links, err := m.findMigsNamed(cfg.Re)
+		mu.Lock()
+		defer mu.Unlock()
 		if err != nil {
-			return fmt.Errorf("cannot autodiscover managed instance groups: %v", err)
+			cancel()
+			errs = append(errs, fmt.Errorf("cannot autodiscover managed instance groups: %v", err))
+			return
 		}
 		for _, link := range links {
 			mig, err := m.buildMigFromAutoCfg(link, cfg)
 			if err != nil {
-				return err
+				cancel()
+				errs = append(errs, err)
+				return
 			}
 			exists[mig.GceRef()] = true
 			if m.explicitlyConfigured[mig.GceRef()] {
@@ -383,6 +397,10 @@ func (m *gceManagerImpl) fetchAutoMigs() error {
 				changed = true
 			}
 		}
+	}, workqueue.WithChunkSize(20))
+	cancel()
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to autodiscovered MIGs: %v", errs)
 	}
 
 	for _, mig := range m.GetMigs() {
