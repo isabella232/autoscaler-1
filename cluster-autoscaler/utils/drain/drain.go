@@ -224,6 +224,12 @@ func GetPodsForDeletionOnNodeDrain(
 				return []*apiv1.Pod{}, &BlockingPod{Pod: pod, Reason: NotSafeToEvictAnnotation}, fmt.Errorf("pod annotated as not safe to evict present: %s", pod.Name)
 			}
 		}
+
+		ignoreTerminatingPods := true // TODO move as parameter of the function/process
+		if ignoreTerminatingPods && PodShouldBeTerminated(pod){
+			continue
+		}
+
 		pods = append(pods, pod)
 	}
 	return pods, nil, nil
@@ -286,4 +292,9 @@ func hasSafeToEvictAnnotation(pod *apiv1.Pod) bool {
 // This checks if pod has PodSafeToEvictKey annotation set to false
 func hasNotSafeToEvictAnnotation(pod *apiv1.Pod) bool {
 	return pod.GetAnnotations()[PodSafeToEvictKey] == "false"
+}
+
+func PodShouldBeTerminated(pod *apiv1.Pod) bool {
+	// TODO better logic using grace period of container instead of hardcoding 30s
+	return pod.DeletionTimestamp!=nil && time.Since(pod.DeletionTimestamp.Time)>30*time.Second
 }

@@ -268,6 +268,14 @@ func calculateUtilizationOfResource(node *apiv1.Node, nodeInfo *schedulerframewo
 		if skipMirrorPods && pod_util.IsMirrorPod(podInfo.Pod) {
 			continue
 		}
+
+		ignoreTerminatingPods := true // TODO move as parameter of the function/process
+		if ignoreTerminatingPods {
+			if drain.PodShouldBeTerminated(podInfo.Pod) {
+				continue
+			}
+		}
+
 		for _, container := range podInfo.Pod.Spec.Containers {
 			if resourceValue, found := container.Resources.Requests[resourceName]; found {
 				podsRequest.Add(resourceValue)
