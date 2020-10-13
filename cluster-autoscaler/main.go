@@ -174,6 +174,7 @@ var (
 	awsUseStaticInstanceList           = flag.Bool("aws-use-static-instance-list", false, "Should CA fetch instance types in runtime or use a static list. AWS only")
 	enableProfiling                    = flag.Bool("profiling", false, "Is debug/pprof endpoint enabled")
 	clusterAPICloudConfigAuthoritative = flag.Bool("clusterapi-cloud-config-authoritative", false, "Treat the cloud-config flag authoritatively (do not fallback to using kubeconfig flag). ClusterAPI only")
+	scaleUpTemplateFromCloudProvider   = flag.Bool("scale-up-from-cloud-provider-template", false, "Build nodes templates from cloud providers node groups rather than real-world nodes. WARNING: this isn't supported by all cloud providers, and can lead to wrong autoscaling decisions (erroneous capacity evaluations causing infinite upscales, or pods left pending).")
 )
 
 func createAutoscalingOptions() config.AutoscalingOptions {
@@ -243,6 +244,7 @@ func createAutoscalingOptions() config.AutoscalingOptions {
 		NodeDeletionDelayTimeout:           *nodeDeletionDelayTimeout,
 		AWSUseStaticInstanceList:           *awsUseStaticInstanceList,
 		ClusterAPICloudConfigAuthoritative: *clusterAPICloudConfigAuthoritative,
+		ScaleUpTemplateFromCloudProvider:   *scaleUpTemplateFromCloudProvider,
 	}
 }
 
