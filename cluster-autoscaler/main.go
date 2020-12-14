@@ -43,6 +43,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 	ca_processors "k8s.io/autoscaler/cluster-autoscaler/processors"
 	"k8s.io/autoscaler/cluster-autoscaler/processors/nodegroupset"
+	"k8s.io/autoscaler/cluster-autoscaler/processors/nodeinfos"
 	"k8s.io/autoscaler/cluster-autoscaler/simulator"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
 	kube_util "k8s.io/autoscaler/cluster-autoscaler/utils/kubernetes"
@@ -174,6 +175,7 @@ var (
 	awsUseStaticInstanceList           = flag.Bool("aws-use-static-instance-list", false, "Should CA fetch instance types in runtime or use a static list. AWS only")
 	enableProfiling                    = flag.Bool("profiling", false, "Is debug/pprof endpoint enabled")
 	clusterAPICloudConfigAuthoritative = flag.Bool("clusterapi-cloud-config-authoritative", false, "Treat the cloud-config flag authoritatively (do not fallback to using kubeconfig flag). ClusterAPI only")
+	enableRefineUsingSimilarNodeGroups = flag.Bool("refine-using-similar-nodegroups", false, "Refine empty nodegoups capacities evaluations using real-world nodes from similar nodegroups when available.")
 )
 
 func createAutoscalingOptions() config.AutoscalingOptions {
@@ -243,6 +245,7 @@ func createAutoscalingOptions() config.AutoscalingOptions {
 		NodeDeletionDelayTimeout:           *nodeDeletionDelayTimeout,
 		AWSUseStaticInstanceList:           *awsUseStaticInstanceList,
 		ClusterAPICloudConfigAuthoritative: *clusterAPICloudConfigAuthoritative,
+		EnableRefineUsingSimilarNodeGroups: *enableRefineUsingSimilarNodeGroups,
 	}
 }
 
@@ -315,6 +318,11 @@ func buildAutoscaler() (core.Autoscaler, error) {
 
 	opts.Processors.NodeGroupSetProcessor = &nodegroupset.BalancingNodeGroupSetProcessor{
 		Comparator: nodeInfoComparatorBuilder(autoscalingOptions.BalancingExtraIgnoredLabels),
+	}
+
+	opts.Processors.NodeInfoProcessor = &nodeinfos.RefineNodeInfosProcessor{
+		NodeGroupSetProcessor:        opts.Processors.NodeGroupSetProcessor,
+		RefineUsingSimilarNodeGroups: autoscalingOptions.EnableRefineUsingSimilarNodeGroups,
 	}
 
 	// These metrics should be published only once.
